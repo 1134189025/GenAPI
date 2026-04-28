@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
+
+
+RECENT_IMAGE_GRACE_SECONDS = 60
+_image_cache_lock = RLock()
 
 
 @dataclass(frozen=True)
@@ -63,14 +69,28 @@ def _protected_set(paths: Iterable[Path] | None) -> set[Path]:
     return protected
 
 
+@contextmanager
+def locked_image_cache() -> Iterator[None]:
+    with _image_cache_lock:
+        yield
+
+
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 def get_image_cache_status(root: Path, limits: ImageCacheLimits) -> dict[str, Any]:
-    files = _iter_image_cache_files(root)
-    return {
-        "total_size_bytes": sum(item.size for item in files),
-        "file_count": len(files),
-        "max_size_bytes": limits.max_size_bytes,
-        "auto_delete_enabled": bool(limits.auto_delete_enabled),
-    }
+    with _image_cache_lock:
+        files = _iter_image_cache_files(root)
+        return {
+            "total_size_bytes": sum(item.size for item in files),
+            "file_count": len(files),
+            "max_size_bytes": limits.max_size_bytes,
+            "auto_delete_enabled": bool(limits.auto_delete_enabled),
+        }
 
 
 def cleanup_image_cache(
@@ -79,56 +99,53 @@ def cleanup_image_cache(
     *,
     protected_paths: Iterable[Path] | None = None,
 ) -> dict[str, Any]:
-    protected = _protected_set(protected_paths)
-    removed_files = 0
-    removed_expired_files = 0
-    removed_oversize_files = 0
-    removed_size_bytes = 0
+    with _image_cache_lock:
+        protected = _protected_set(protected_paths)
+        removed_files = 0
+        removed_expired_files = 0
+        removed_oversize_files = 0
+        removed_size_bytes = 0
 
-    if limits.auto_delete_enabled:
-        cutoff = time.time() - limits.retention_seconds
-        for item in sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at):
-            try:
-                resolved = item.path.resolve()
-            except OSError:
-                resolved = item.path
-            if resolved in protected or item.modified_at >= cutoff:
-                continue
-            try:
-                item.path.unlink()
-            except FileNotFoundError:
-                continue
-            removed_files += 1
-            removed_expired_files += 1
-            removed_size_bytes += item.size
+        if limits.auto_delete_enabled:
+            now = time.time()
+            cutoff = now - limits.retention_seconds
+            recent_cutoff = now - RECENT_IMAGE_GRACE_SECONDS
+            for item in sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at):
+                resolved = _resolve_path(item.path)
+                if resolved in protected or item.modified_at >= cutoff:
+                    continue
+                try:
+                    item.path.unlink()
+                except FileNotFoundError:
+                    continue
+                removed_files += 1
+                removed_expired_files += 1
+                removed_size_bytes += item.size
 
-        files = sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at)
-        total_size = sum(item.size for item in files)
-        for item in files:
-            if total_size <= limits.max_size_bytes:
-                break
-            try:
-                resolved = item.path.resolve()
-            except OSError:
-                resolved = item.path
-            if resolved in protected:
-                continue
-            try:
-                item.path.unlink()
-            except FileNotFoundError:
-                continue
-            total_size -= item.size
-            removed_files += 1
-            removed_oversize_files += 1
-            removed_size_bytes += item.size
+            files = sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at)
+            total_size = sum(item.size for item in files)
+            for item in files:
+                if total_size <= limits.max_size_bytes:
+                    break
+                resolved = _resolve_path(item.path)
+                if resolved in protected or item.modified_at >= recent_cutoff:
+                    continue
+                try:
+                    item.path.unlink()
+                except FileNotFoundError:
+                    continue
+                total_size -= item.size
+                removed_files += 1
+                removed_oversize_files += 1
+                removed_size_bytes += item.size
 
-        _remove_empty_dirs(root)
+            _remove_empty_dirs(root)
 
-    status = get_image_cache_status(root, limits)
-    return {
-        **status,
-        "removed_files": removed_files,
-        "removed_expired_files": removed_expired_files,
-        "removed_oversize_files": removed_oversize_files,
-        "removed_size_bytes": removed_size_bytes,
-    }
+        status = get_image_cache_status(root, limits)
+        return {
+            **status,
+            "removed_files": removed_files,
+            "removed_expired_files": removed_expired_files,
+            "removed_oversize_files": removed_oversize_files,
+            "removed_size_bytes": removed_size_bytes,
+        }

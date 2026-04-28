@@ -13,6 +13,7 @@ import tiktoken
 
 from services.account_service import account_service
 from services.config import config
+from services.image_cache_service import locked_image_cache
 from services.openai_backend_api import OpenAIBackendAPI
 from utils.helper import IMAGE_MODELS
 from utils.log import logger
@@ -64,9 +65,10 @@ def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     filename = f"{int(time.time())}_{file_hash}.png"
     relative_dir = Path(time.strftime("%Y"), time.strftime("%m"), time.strftime("%d"))
     file_path = config.images_dir / relative_dir / filename
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_bytes(image_data)
-    config.cleanup_old_images(protected_paths={file_path})
+    with locked_image_cache():
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(image_data)
+        config.cleanup_old_images(protected_paths={file_path})
     return f"{(base_url or config.base_url)}/images/{relative_dir.as_posix()}/{filename}"
 
 

@@ -87,6 +87,22 @@ class ImageCacheServiceTests(unittest.TestCase):
             self.assertEqual(result["removed_oversize_files"], 1)
             self.assertGreater(result["total_size_bytes"], result["max_size_bytes"])
 
+    def test_cleanup_keeps_recent_images_during_size_pruning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            old_file = write_image(root / "2026" / "04" / "28" / "old.png", 600, age_days=1)
+            new_file = write_image(root / "2026" / "04" / "29" / "new.png", 600, age_days=0)
+
+            result = cleanup_image_cache(
+                root,
+                ImageCacheLimits(retention_days=30, max_size_mb=0.0005, auto_delete_enabled=True),
+            )
+
+            self.assertFalse(old_file.exists())
+            self.assertTrue(new_file.exists())
+            self.assertEqual(result["removed_oversize_files"], 1)
+            self.assertGreater(result["total_size_bytes"], result["max_size_bytes"])
+
     def test_cleanup_does_not_delete_when_auto_delete_is_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

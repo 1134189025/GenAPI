@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -70,6 +71,34 @@ class SettingsImageCacheAPITests(unittest.TestCase):
         self.assertIn("total_size_bytes", payload["image_cache"])
         self.assertIn("file_count", payload["image_cache"])
 
+    def test_settings_status_scan_runs_outside_route_thread(self) -> None:
+        system_module = sys.modules["api.system"]
+        config = system_module.config
+        original_get = config.get
+        original_status = config.get_image_cache_status
+        threads: dict[str, int] = {}
+
+        def tracked_get():
+            threads["get"] = threading.get_ident()
+            return original_get()
+
+        def tracked_status():
+            threads["status"] = threading.get_ident()
+            return original_status()
+
+        config.get = tracked_get
+        config.get_image_cache_status = tracked_status
+        try:
+            response = self.client.get("/api/settings", headers=self.headers)
+        finally:
+            config.get = original_get
+            config.get_image_cache_status = original_status
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("get", threads)
+        self.assertIn("status", threads)
+        self.assertNotEqual(threads["get"], threads["status"])
+
     def test_saving_image_cache_settings_returns_normalized_status(self) -> None:
         response = self.client.post(
             "/api/settings",
@@ -88,6 +117,47 @@ class SettingsImageCacheAPITests(unittest.TestCase):
         self.assertEqual(payload["config"]["image_cache_auto_delete_enabled"], False)
         self.assertEqual(payload["image_cache"]["max_size_bytes"], 2 * 1024 * 1024)
         self.assertEqual(payload["image_cache"]["auto_delete_enabled"], False)
+
+    def test_settings_cleanup_runs_outside_route_thread(self) -> None:
+        system_module = sys.modules["api.system"]
+        config = system_module.config
+        original_update = config.update
+        original_cleanup = config.cleanup_old_images
+        original_status = config.get_image_cache_status
+        threads: dict[str, int] = {}
+
+        def tracked_update(data):
+            threads["update"] = threading.get_ident()
+            return original_update(data)
+
+        def tracked_cleanup(*args, **kwargs):
+            threads["cleanup"] = threading.get_ident()
+            return original_cleanup(*args, **kwargs)
+
+        def tracked_status():
+            threads["status"] = threading.get_ident()
+            return original_status()
+
+        config.update = tracked_update
+        config.cleanup_old_images = tracked_cleanup
+        config.get_image_cache_status = tracked_status
+        try:
+            response = self.client.post(
+                "/api/settings",
+                headers=self.headers,
+                json={"image_retention_days": "14"},
+            )
+        finally:
+            config.update = original_update
+            config.cleanup_old_images = original_cleanup
+            config.get_image_cache_status = original_status
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("update", threads)
+        self.assertIn("cleanup", threads)
+        self.assertIn("status", threads)
+        self.assertNotEqual(threads["update"], threads["cleanup"])
+        self.assertNotEqual(threads["update"], threads["status"])
 
 
 if __name__ == "__main__":
