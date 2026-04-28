@@ -1,121 +1,227 @@
 <h1 align="center">Genapi</h1>
 
+<p align="center">面向网页生图场景的自托管控制台，集成用户注册登录、图片额度、兑换码、号池管理、SMTP 邮箱验证和 ChatGPT 官网生图能力。</p>
 
-<p align="center">Genapi 主要面向网页生图工作流，提供在线画图、图片编辑、多图组图编辑、用户注册登录、额度兑换、号池管理、多种账号导入方式与 Docker 自托管部署能力。</p>
+<p align="center">
+  <a href="https://github.com/1134189025/GenAPI">GitHub</a>
+  ·
+  <a href="./docs/feature-status.en.md">功能状态</a>
+  ·
+  <a href="./docs/upstream-sse-conversation.md">上游流式协议说明</a>
+</p>
 
-> [!WARNING]
-> 免责声明：
->
-> 本项目涉及对 ChatGPT 官网文本生成、图片生成与图片编辑等相关接口的逆向研究，仅供个人学习、技术研究与非商业性技术交流使用。
->
-> - 严禁将本项目用于任何商业用途、盈利性使用、批量操作、自动化滥用或规模化调用。
-> - 严禁将本项目用于破坏市场秩序、恶意竞争、套利倒卖、二次售卖相关服务，以及任何违反 OpenAI 服务条款或当地法律法规的行为。
-> - 严禁将本项目用于生成、传播或协助生成违法、暴力、色情、未成年人相关内容，或用于诈骗、欺诈、骚扰等非法或不当用途。
-> - 使用者应自行承担全部风险，包括但不限于账号被限制、临时封禁或永久封禁以及因违规使用等所导致的法律责任。
-> - 使用本项目即视为你已充分理解并同意本免责声明全部内容；如因滥用、违规或违法使用造成任何后果，均由使用者自行承担。
+## 项目定位
 
-> [!IMPORTANT]
-> 本项目基于对 ChatGPT 官网相关能力的逆向研究实现，存在账号受限、临时封禁或永久封禁的风险。请勿使用你自己的重要账号、常用账号或高价值账号进行测试。
+Genapi 不是通用 OpenAI API 转发服务。当前版本已经关闭 `/v1/*` OpenAI 兼容外部接口，只保留网页端生图工作流。
 
-> [!CAUTION]
-> 旧版本存在已知漏洞，请尽快升级到最新版本。公网部署时请尽量不要放置敏感信息，并自行做好访问控制与隔离。
+普通用户通过网页登录后使用 `/image` 生图；管理员通过后台维护用户、图片额度、兑换码、优惠码、SMTP 设置和 OpenAI 账号池。文本接口只作为内部能力保留，不对外提供用户 API 调用入口。
 
-## 快速开始
+## 主要功能
 
-已发布镜像支持 `linux/amd64` 与 `linux/arm64`，在 x86 服务器和 Apple Silicon / ARM Linux 设备上都会自动拉取匹配架构的版本。
+- 网页生图工作台：支持文生图、图生图、多参考图编辑、多张图片生成和本地会话历史。
+- 用户系统：首次安装创建管理员，普通用户使用邮箱密码登录，JWT 会话鉴权。
+- 注册控制：支持注册开关、邮箱验证码、邮箱后缀白名单、邀请码和注册优惠码。
+- 图片额度：普通用户按图片张数扣减额度，管理员不受额度和并发限制。
+- 兑换码：管理员生成图片额度码、并发码、邀请码，用户登录后可兑换额度或并发。
+- 优惠码：注册时可选输入优惠码，按配置赠送图片额度并限制使用次数和有效期。
+- SMTP 邮件：支持配置发信服务器，验证码默认 15 分钟有效，发送冷却 60 秒。
+- 号池管理：支持账号导入、刷新、筛选、导出、代理配置、限流检测和无效 Token 清理。
+- sub2api 导入：可连接 sub2api 服务并批量导入 OpenAI OAuth 账号。
+- Docker 部署：提供生产 compose 和本地构建 compose。
+
+## 界面预览
+
+文生图界面：
+
+![文生图界面](assets/image.png)
+
+图生图界面：
+
+![图生图界面](assets/image_edit.png)
+
+号池管理：
+
+![号池管理](assets/account_pool.png)
+
+## 快速部署
+
+### 1. 克隆项目
 
 ```bash
-git clone git@github.com:1134189025/GenAPI.git
+git clone https://github.com/1134189025/GenAPI.git
+cd GenAPI
+```
+
+### 2. 启动服务
+
+```bash
 docker compose up -d
 ```
 
-默认 Docker Compose 会把容器内的 `80` 端口发布到宿主机 `3000`，启动后访问 `http://localhost:3000`；局域网访问时使用宿主机 IP，例如 `http://192.168.1.10:3000`。
+默认端口：
 
-首次访问网页会进入 `/setup` 安装向导，创建第一个管理员账号。后续登录使用邮箱、密码和 JWT 会话；旧版 `auth-key` / `user-key` 登录方式不再作为用户鉴权入口。
+- 宿主机访问：`http://localhost:3000`
+- 局域网访问：`http://<服务器局域网 IP>:3000`
+- 容器内服务端口：`80`
 
-本地构建调试可使用：
+首次访问会进入 `/setup` 安装向导，创建第一个管理员账号。管理员创建完成后，后续统一使用邮箱、密码登录。
+
+### 3. 常用管理入口
+
+- 生图页面：`/image`
+- 用户兑换：`/redeem`
+- 管理员账号池：`/admin/accounts`
+- 管理员用户管理：`/admin/users`
+- 管理员兑换码：`/admin/redeem-codes`
+- 管理员优惠码：`/admin/promo-codes`
+- 管理员注册机：`/admin/register-machine`
+- 管理员设置：`/admin/settings`
+
+## 本地开发
+
+### 后端
+
+项目使用 Python 3.13 和 `uv`。
+
+```bash
+uv sync
+uv run python main.py
+```
+
+默认后端开发端口为 `8000`。
+
+### 前端
+
+项目使用 Next.js、React 和 Bun。
+
+```bash
+cd web
+bun install
+bun run dev
+```
+
+前端开发服务默认监听 `3000`，并会根据当前访问主机名推导后端地址 `http://<host>:8000`。如需指定后端地址：
+
+```bash
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev
+```
+
+### 本地 Docker 构建
 
 ```bash
 docker compose -f docker-compose.local.yml up --build
 ```
 
-`docker-compose.local.yml` 会把容器发布到宿主机 `8000`。如果单独运行前端开发服务器，默认会从当前访问主机名推导后端地址 `http://<host>:8000`，需要改端口或跨域后端时设置 `NEXT_PUBLIC_API_URL`。
+`docker-compose.local.yml` 会把容器发布到宿主机 `8000`，适合本机调试构建结果。
 
-### 存储后端配置
+## 配置说明
 
-支持通过环境变量 `STORAGE_BACKEND` 切换存储方式：
+可以复制 `.env.example` 并按需设置环境变量。
 
-- `json` - 本地 JSON 文件（默认）
-- `sqlite` - 本地 SQLite 数据库
-- `postgres` - 外部 PostgreSQL（需配置 `DATABASE_URL`）
-- `git` - Git 私有仓库（需配置 `GIT_REPO_URL` 和 `GIT_TOKEN`）
-
-示例：使用 PostgreSQL
-```yaml
-environment:
-  - STORAGE_BACKEND=postgres
-  - DATABASE_URL=postgresql://user:password@host:5432/dbname
+```bash
+cp .env.example .env
 ```
 
-## 功能
+常用环境变量：
 
-### 网页生图能力
+- `JWT_SECRET`：JWT 签名密钥，生产环境建议设置为至少 32 字节的随机字符串。
+- `GENAPI_USER_DATABASE_URL`：用户系统数据库地址，默认使用 `data/users.db`。
+- `GENAPI_BASE_URL`：生成图片 URL 时使用的外部访问地址。
+- `STORAGE_BACKEND`：号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
+- `DATABASE_URL`：账号池数据库地址，`STORAGE_BACKEND=sqlite/postgres` 时使用。
+- `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
 
-- `/v1/*` OpenAI 兼容外部 API 已下线，项目只保留网页端生图工作流
-- 网页内部通过 JWT 调用 `/api/image/generations` 和 `/api/image/edits`
-- 支持通过 `n` 返回多张生成结果
-- 支持 Codex 中的画图接口逆向，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2`，如有需要可自行在其他场景映射回 `gpt-image-2`，用于和官网画图区分；也就意味着同一账号会同时有官网和 Codex 两份生图额度
+运行时敏感数据默认保存在 `data/` 目录，包括用户数据库、JWT 密钥、日志和账号池数据。该目录已被 `.gitignore` 排除，不应提交到 Git 仓库。
 
-### 在线画图功能
+## 邮箱验证码
 
-- 内置在线画图工作台，支持生成、图片编辑与多图组图编辑
-- 支持 `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` 模型选择
-- 编辑模式支持参考图上传
-- 前端支持多图生成交互
-- 本地保存图片会话历史，支持回看、删除和清空
-- 支持服务端缓存图片URL
+在管理员设置页配置 SMTP 后，注册页可以发送邮箱验证码。常见 QQ 邮箱配置示例：
 
-### 号池管理功能
+- SMTP Host：`smtp.qq.com`
+- SMTP Port：`465`
+- SMTP Username：你的 QQ 邮箱地址
+- SMTP Password：QQ 邮箱 SMTP 授权码，不是登录密码
+- SMTP From：可留空，默认使用 SMTP Username
 
-- 自动刷新账号邮箱、类型、额度和恢复时间
-- 轮询可用账号执行图片生成与图片编辑
-- 遇到 Token 失效类错误时自动剔除无效 Token
-- 定时检查限流账号并自动刷新
-- 支持网页端配置全局 HTTP / HTTPS / SOCKS5 / SOCKS5H 代理
-- 支持搜索、筛选、批量刷新、导出、手动编辑和清理账号
-- 支持四种导入方式：本地 CPA JSON 文件导入、远程 CPA 服务器导入、`sub2api` 服务器导入、`access_token` 导入
-- 支持在设置页配置 `sub2api` 服务器，筛选并批量导入其中的 OpenAI OAuth 账号
+端口 `465` 使用 SSL，其他端口默认使用 STARTTLS。验证码邮件会使用站点名作为发信显示名，站点名可在管理员设置中修改。
 
-### 实验性 / 规划中
+## 用户与额度规则
 
-- 详细状态说明见：[功能清单](./docs/feature-status.en.md)
+- 管理员不受图片额度和图片并发限制。
+- 普通用户调用网页生图会按生成图片数量扣减额度。
+- 生图请求采用先预留、后结算逻辑；失败或未实际返回图片时会退回未生成部分额度。
+- 图片并发超限会返回 429。
+- 额度不足会返回 OpenAI 兼容的 `insufficient_quota` 错误结构。
+- 文本相关能力不扣图片额度。
 
-## Screenshots
+## 账号池导入方式
 
-文生图界面：
+管理员可以在后台导入和维护 OpenAI 账号：
 
-![image](assets/image.png)
+- 本地 CPA JSON 文件导入
+- 远程 CPA 服务器导入
+- sub2api 服务器导入
+- access_token 手动导入
 
-编辑图：
+导入后可在账号池页面刷新账号状态、查看额度恢复时间、筛选账号类型、导出数据、配置代理并清理失效 Token。
 
-![image](assets/image_edit.png)
+## 接口边界
 
-号池管理：
+当前版本保留网页内部接口，例如：
 
-![image](assets/account_pool.png)
+- `POST /api/image/generations`
+- `POST /api/image/edits`
+- `POST /api/auth/login`
+- `POST /api/auth/register`
+- `POST /api/auth/send-verify-code`
+- `GET /api/auth/me`
 
-## 社区支持
+`/v1/*` OpenAI 兼容外部 API 已下线，直接访问会返回 `404 Not Found`。如果需要重新开放外部 API，应先重新设计权限、额度、审计和滥用控制，不建议直接恢复旧接口。
 
-学 AI , 上 L 站：[LinuxDO](https://linux.do)
+## 验证命令
 
-## Contributors
+后端测试：
 
-感谢所有为本项目做出贡献的开发者：
+```bash
+uv run python -m unittest discover -s test
+```
 
-<a href="https://github.com/1134189025/GenAPI/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=1134189025/GenAPI" />
-</a>
+前端测试、类型检查和构建：
 
-## Star History
+```bash
+cd web
+bun test
+bun run typecheck
+bun run build
+```
 
-[![Star History Chart](https://api.star-history.com/chart?repos=1134189025/GenAPI&type=date&legend=top-left)](https://www.star-history.com/?repos=1134189025%2FGenAPI&type=date&legend=top-left)
+## 安全注意事项
+
+> [!WARNING]
+> 本项目涉及对 ChatGPT 官网相关能力的逆向研究，仅供个人学习、技术研究与非商业性技术交流使用。
+
+- 不要把 `data/`、`.env`、`config.json`、数据库文件、JWT 密钥、SMTP 授权码、OpenAI Token 提交到 Git 仓库。
+- 不建议直接公网裸露部署；如需公网访问，请自行配置 HTTPS、反向代理、访问控制和备份策略。
+- 不要使用你的重要 OpenAI 账号或高价值账号测试号池能力。
+- 使用者应自行承担账号限制、封禁、数据泄露、违规使用等风险。
+
+## 目录结构
+
+```text
+.
+├── api/                 # FastAPI 路由
+├── services/            # 账号池、用户、邮箱、额度、生图等服务逻辑
+├── utils/               # 通用工具
+├── test/                # 后端单元测试
+├── web/                 # Next.js 前端
+├── docs/                # 项目文档
+├── assets/              # README 截图资源
+├── data/                # 运行时数据，已忽略
+├── Dockerfile
+├── docker-compose.yml
+└── docker-compose.local.yml
+```
+
+## License
+
+本项目使用 MIT License。详见 [LICENSE](./LICENSE)。
