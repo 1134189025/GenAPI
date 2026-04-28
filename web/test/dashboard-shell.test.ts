@@ -14,19 +14,23 @@ describe("dashboard shell navigation", () => {
   test("uses admin canonical routes for management pages", () => {
     const adminRoutes = getNavigationGroups("admin").flatMap((group) => group.items.map((item) => item.href));
 
+    expect(adminRoutes).toContain("/membership");
+    expect(adminRoutes).toContain("/admin/membership-plans");
     expect(adminRoutes).toContain("/admin/accounts");
     expect(adminRoutes).toContain("/admin/images");
     expect(adminRoutes).toContain("/admin/logs");
     expect(adminRoutes).toContain("/admin/settings");
   });
 
-  test("keeps user navigation limited to image and redeem pages", () => {
+  test("keeps user navigation focused on image membership and redeem pages", () => {
     const userRoutes = getNavigationGroups("user").flatMap((group) => group.items.map((item) => item.href));
 
-    expect(userRoutes).toEqual(["/image", "/redeem"]);
+    expect(userRoutes).toEqual(["/image", "/membership", "/redeem"]);
   });
 
   test("resolves page metadata for canonical and legacy routes", () => {
+    expect(getPageMeta("/membership").title).toBe("会员中心");
+    expect(getPageMeta("/admin/membership-plans").description).toContain("会员套餐");
     expect(getPageMeta("/admin/accounts").title).toBe("账号池");
     expect(getPageMeta("/accounts").title).toBe("账号池");
     expect(getPageMeta("/admin/settings").description).toContain("SMTP");

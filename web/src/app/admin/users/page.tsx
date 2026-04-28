@@ -116,8 +116,9 @@ export default function AdminUsersPage() {
   const summary = useMemo(() => {
     const enabled = items.filter((item) => item.enabled).length;
     const admins = items.filter((item) => item.role === "admin").length;
-    const quota = items.reduce((sum, item) => sum + Math.max(0, item.image_quota), 0);
-    return { total: items.length, enabled, admins, quota };
+    const quota = items.reduce((sum, item) => sum + Math.max(0, item.total_image_quota ?? item.image_quota), 0);
+    const memberQuota = items.reduce((sum, item) => sum + Math.max(0, item.member_image_quota ?? 0), 0);
+    return { total: items.length, enabled, admins, quota, memberQuota };
   }, [items]);
 
   const resetCreateDialog = () => {
@@ -262,6 +263,7 @@ export default function AdminUsersPage() {
         <StatCard label="已启用" value={summary.enabled} icon={<UserCheck className="size-5" />} tone="emerald" />
         <StatCard label="管理员" value={summary.admins} icon={<ShieldCheck className="size-5" />} tone="teal" />
         <StatCard label="图片额度" value={summary.quota} icon={<Plus className="size-5" />} tone="blue" />
+        <StatCard label="会员额度" value={summary.memberQuota} icon={<Plus className="size-5" />} tone="amber" />
       </div>
 
       <DataPanel
@@ -335,13 +337,15 @@ export default function AdminUsersPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <Table className="min-w-[1080px]">
+            <Table className="min-w-[1180px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>用户</TableHead>
                   <TableHead>角色</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>图片额度</TableHead>
+                  <TableHead>会员额度</TableHead>
+                  <TableHead>会员状态</TableHead>
                   <TableHead>图片并发</TableHead>
                   <TableHead>活动请求</TableHead>
                   <TableHead>创建时间</TableHead>
@@ -385,7 +389,13 @@ export default function AdminUsersPage() {
                           {status.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-slate-700">{item.image_quota}</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.total_image_quota ?? item.image_quota}</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.member_image_quota ?? 0}</TableCell>
+                      <TableCell>
+                        <Badge variant={item.membership_status === "active" ? "warning" : "secondary"} className="rounded-md">
+                          {item.membership_status === "active" ? item.membership_plan_name || "会员" : item.membership_status === "expired" ? "已过期" : "未开通"}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="font-medium text-slate-700">{item.image_concurrency}</TableCell>
                       <TableCell className="text-slate-500">{item.active_image_requests}</TableCell>
                       <TableCell className="text-xs text-slate-500">{formatUserDateTime(item.created_at)}</TableCell>

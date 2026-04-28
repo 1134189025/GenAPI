@@ -122,11 +122,49 @@ export type ManagedUser = {
   role: AuthRole;
   enabled: boolean;
   image_quota: number;
+  member_image_quota: number;
+  total_image_quota: number;
+  membership: UserMembership | null;
+  membership_status: MembershipStatus;
+  membership_plan_id: string | null;
+  membership_plan_name: string;
+  membership_expires_at: string | null;
+  membership_period_ends_at: string | null;
   image_concurrency: number;
   active_image_requests: number;
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
+};
+
+export type MembershipStatus = "inactive" | "active" | "expired" | string;
+
+export type UserMembership = {
+  id: string;
+  plan_id: string | null;
+  plan_name: string;
+  status: MembershipStatus;
+  member_image_quota: number;
+  period_image_quota: number;
+  duration_days: number;
+  period_days: number;
+  activated_at: string | null;
+  expires_at: string | null;
+  current_period_started_at: string | null;
+  current_period_ends_at: string | null;
+};
+
+export type MembershipPlan = {
+  id: string;
+  name: string;
+  description: string;
+  duration_days: number;
+  period_days: number;
+  period_image_quota: number;
+  enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AuthSettings = {
@@ -150,13 +188,14 @@ export type AuthSettings = {
   has_smtp_password: boolean;
 };
 
-export type RedeemCodeType = "image_quota" | "concurrency" | "invitation";
+export type RedeemCodeType = "image_quota" | "concurrency" | "invitation" | "membership";
 
 export type RedeemCode = {
   id: string;
   code_preview: string;
   type: RedeemCodeType;
   value: number;
+  membership_plan_id?: string | null;
   enabled: boolean;
   used: boolean;
   used_by_user_id: string | null;
@@ -410,6 +449,44 @@ export async function fetchManagedUsers(query = "") {
   return httpRequest<{ items: ManagedUser[] }>(`/api/admin/users${params.toString() ? `?${params.toString()}` : ""}`);
 }
 
+export async function fetchMembershipPlans() {
+  return httpRequest<{ items: MembershipPlan[] }>("/api/membership/plans");
+}
+
+export async function fetchUserMembership() {
+  return httpRequest<{ membership: UserMembership | null; user: ManagedUser }>("/api/membership/me");
+}
+
+export async function fetchAdminMembershipPlans() {
+  return httpRequest<{ items: MembershipPlan[] }>("/api/admin/membership-plans");
+}
+
+export async function createMembershipPlan(payload: {
+  name: string;
+  description: string;
+  duration_days: number;
+  period_days: number;
+  period_image_quota: number;
+  enabled: boolean;
+  sort_order: number;
+}) {
+  return httpRequest<{ item: MembershipPlan; items: MembershipPlan[] }>("/api/admin/membership-plans", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function updateMembershipPlan(planId: string, updates: Partial<MembershipPlan>) {
+  return httpRequest<{ item: MembershipPlan; items: MembershipPlan[] }>(`/api/admin/membership-plans/${planId}`, {
+    method: "PATCH",
+    body: updates,
+  });
+}
+
+export async function deleteMembershipPlan(planId: string) {
+  return httpRequest<{ items: MembershipPlan[] }>(`/api/admin/membership-plans/${planId}`, { method: "DELETE" });
+}
+
 export async function createManagedUser(payload: {
   email: string;
   password: string;
@@ -442,6 +519,7 @@ export async function generateRedeemCodes(payload: {
   value: number;
   count: number;
   expires_at?: string;
+  membership_plan_id?: string;
 }) {
   return httpRequest<{ codes: RedeemCode[]; items: RedeemCode[] }>("/api/admin/redeem-codes/generate", {
     method: "POST",

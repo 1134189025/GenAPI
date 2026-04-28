@@ -23,7 +23,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { deleteRedeemCode, fetchRedeemCodes, generateRedeemCodes, updateRedeemCode, type RedeemCode, type RedeemCodeType } from "@/lib/api";
+import { deleteRedeemCode, fetchAdminMembershipPlans, fetchRedeemCodes, generateRedeemCodes, updateRedeemCode, type MembershipPlan, type RedeemCode, type RedeemCodeType } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,7 @@ type GenerateFormState = {
   value: string;
   count: string;
   expires_at: string;
+  membership_plan_id: string;
 };
 
 type EditFormState = {
@@ -49,12 +50,14 @@ const defaultGenerateForm: GenerateFormState = {
   value: "10",
   count: "1",
   expires_at: "",
+  membership_plan_id: "",
 };
 
 export default function AdminRedeemCodesPage() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);
   const didLoadRef = useRef(false);
   const [items, setItems] = useState<RedeemCode[]>([]);
+  const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<RedeemCodeType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<RedeemStatusFilter>("all");
@@ -78,6 +81,8 @@ export default function AdminRedeemCodesPage() {
     try {
       const data = await fetchRedeemCodes();
       setItems(data.items);
+      const planData = await fetchAdminMembershipPlans();
+      setPlans(planData.items);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载兑换码失败");
     } finally {
@@ -120,14 +125,19 @@ export default function AdminRedeemCodesPage() {
   }, [items]);
 
   const handleGenerate = async () => {
+    if (generateForm.type === "membership" && !generateForm.membership_plan_id) {
+      toast.error("请选择会员套餐");
+      return;
+    }
     setIsGenerating(true);
     try {
       const expiresAt = datetimeLocalToApiValue(generateForm.expires_at);
       const data = await generateRedeemCodes({
         type: generateForm.type,
-        value: generateForm.type === "invitation" ? 0 : Math.max(1, Math.trunc(Number(generateForm.value) || 1)),
+        value: generateForm.type === "invitation" || generateForm.type === "membership" ? 0 : Math.max(1, Math.trunc(Number(generateForm.value) || 1)),
         count: Math.max(1, Math.trunc(Number(generateForm.count) || 1)),
         ...(expiresAt ? { expires_at: expiresAt } : {}),
+        ...(generateForm.type === "membership" ? { membership_plan_id: generateForm.membership_plan_id } : {}),
       });
       setItems(data.items);
       setGeneratedCodes(data.codes.map((item) => String(item.code || "")).filter(Boolean));
@@ -270,6 +280,7 @@ export default function AdminRedeemCodesPage() {
                 <SelectItem value="all">全部类型</SelectItem>
                 <SelectItem value="image_quota">图片额度</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
+                <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
               </SelectContent>
             </Select>
@@ -333,7 +344,7 @@ export default function AdminRedeemCodesPage() {
                         <span className="font-mono text-sm font-semibold text-slate-900">{item.code_preview}</span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={item.type === "invitation" ? "violet" : item.type === "concurrency" ? "info" : "secondary"} className="rounded-md">
+                        <Badge variant={item.type === "invitation" ? "violet" : item.type === "membership" ? "warning" : item.type === "concurrency" ? "info" : "secondary"} className="rounded-md">
                           {getRedeemCodeTypeLabel(item.type)}
                         </Badge>
                       </TableCell>
@@ -404,6 +415,7 @@ export default function AdminRedeemCodesPage() {
       <GenerateRedeemDialog
         open={isGenerateOpen}
         form={generateForm}
+        plans={plans}
         isSubmitting={isGenerating}
         onOpenChange={(open) => setIsGenerateOpen(open)}
         onFormChange={setGenerateForm}
@@ -472,6 +484,7 @@ function GenerateRedeemDialog({
   open,
   form,
   isSubmitting,
+  plans,
   onOpenChange,
   onFormChange,
   onSubmit,
@@ -479,6 +492,7 @@ function GenerateRedeemDialog({
   open: boolean;
   form: GenerateFormState;
   isSubmitting: boolean;
+  plans: MembershipPlan[];
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: GenerateFormState) => void;
   onSubmit: () => void;
@@ -499,7 +513,7 @@ function GenerateRedeemDialog({
                 onFormChange({
                   ...form,
                   type: value as RedeemCodeType,
-                  value: value === "invitation" ? "0" : form.value === "0" ? "10" : form.value,
+                  value: value === "invitation" || value === "membership" ? "0" : form.value === "0" ? "10" : form.value,
                 })
               }
             >
@@ -509,18 +523,37 @@ function GenerateRedeemDialog({
               <SelectContent>
                 <SelectItem value="image_quota">图片额度</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
+                <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
               </SelectContent>
             </Select>
           </Field>
+          {form.type === "membership" ? (
+            <Field>
+              <FieldLabel>会员套餐</FieldLabel>
+              <Select value={form.membership_plan_id} onValueChange={(value) => onFormChange({ ...form, membership_plan_id: value })}>
+                <SelectTrigger className="rounded-xl border-stone-200 bg-white">
+                  <SelectValue placeholder="请选择会员套餐" />
+                </SelectTrigger>
+                <SelectContent>
+                  {plans.filter((plan) => plan.enabled).map((plan) => (
+                    <SelectItem key={plan.id} value={plan.id}>
+                      {plan.name} / {plan.period_image_quota} 张每 {plan.period_days} 天
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500">会员兑换码必须绑定一个已启用会员套餐。</p>
+            </Field>
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
               <FieldLabel>数值</FieldLabel>
               <Input
                 value={form.value}
                 type="number"
-                min={form.type === "invitation" ? 0 : 1}
-                disabled={form.type === "invitation"}
+                min={form.type === "invitation" || form.type === "membership" ? 0 : 1}
+                disabled={form.type === "invitation" || form.type === "membership"}
                 className="rounded-xl"
                 onChange={(event) => onFormChange({ ...form, value: event.target.value })}
               />

@@ -37,6 +37,42 @@ describe("admin operations dashboard pages", () => {
     expect(api).toContain("image_cache_auto_delete_enabled");
   });
 
+  test("membership API and dashboard pages expose required frontend contracts", () => {
+    const api = source("src/lib/api.ts");
+    const membershipPage = source("src/app/membership/page.tsx");
+    const adminPlansPage = source("src/app/admin/membership-plans/page.tsx");
+    const adminRedeemCodes = source("src/app/admin/redeem-codes/page.tsx");
+    const redeemPage = source("src/app/redeem/page.tsx");
+    const imagePage = source("src/app/image/page.tsx");
+    const usersPage = source("src/app/admin/users/page.tsx");
+
+    expect(api).toContain("MembershipPlan");
+    expect(api).toContain("fetchMembershipPlans");
+    expect(api).toContain('"/api/membership/plans"');
+    expect(api).toContain("fetchUserMembership");
+    expect(api).toContain('"/api/membership/me"');
+    expect(api).toContain("membership_plan_id");
+    expect(api).toContain("member_image_quota");
+    expect(api).toContain("total_image_quota");
+
+    expect(membershipPage).toContain("会员中心");
+    expect(membershipPage).toContain("当前会员");
+    expect(membershipPage).toContain("会员套餐");
+    expect(membershipPage).toContain("兑换中心");
+
+    expect(adminPlansPage).toContain("会员套餐管理");
+    expect(adminPlansPage).toContain("周期额度");
+    expect(adminPlansPage).toContain("排序");
+    expect(adminPlansPage).toContain('const canLoadAdminData = !isCheckingAuth && session?.role === "admin";');
+
+    expect(adminRedeemCodes).toContain("membership_plan_id");
+    expect(adminRedeemCodes).toContain("会员兑换");
+    expect(adminRedeemCodes).toContain("请选择会员套餐");
+    expect(redeemPage).toContain("会员兑换码");
+    expect(imagePage).toContain("member_image_quota");
+    expect(usersPage).toContain("会员额度");
+  });
+
   test("admin operation pages use shared dashboard primitives", () => {
     const pages = [
       "src/app/accounts/page.tsx",
@@ -76,6 +112,7 @@ describe("admin operations dashboard pages", () => {
       "src/app/admin/users/page.tsx",
       "src/app/admin/redeem-codes/page.tsx",
       "src/app/admin/promo-codes/page.tsx",
+      "src/app/admin/membership-plans/page.tsx",
     ];
 
     for (const path of pages) {

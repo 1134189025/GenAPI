@@ -330,7 +330,9 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     if (!isAdmin) {
       try {
         const data = await fetchMe();
-        setAvailableQuota(String(data.user.image_quota ?? 0));
+        const memberQuota = data.user.member_image_quota ?? 0;
+        const totalQuota = data.user.total_image_quota ?? data.user.image_quota ?? 0;
+        setAvailableQuota(memberQuota > 0 ? `${totalQuota}（会员 ${memberQuota}）` : String(totalQuota));
       } catch {
         setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
       }
