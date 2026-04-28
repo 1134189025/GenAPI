@@ -43,7 +43,12 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return list_images(resolve_image_base_url(request), start_date=start_date.strip(), end_date=end_date.strip())
+        return await run_in_threadpool(
+            list_images,
+            resolve_image_base_url(request),
+            start_date.strip(),
+            end_date.strip(),
+        )
 
     @router.get("/api/logs")
     async def get_logs(type: str = "", start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
