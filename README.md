@@ -1,98 +1,243 @@
 <h1 align="center">Genapi</h1>
 
-<p align="center">面向网页生图场景的自托管控制台，集成用户注册登录、图片额度、兑换码、号池管理、SMTP 邮箱验证和 ChatGPT 官网生图能力。</p>
+<p align="center">面向商业化图片生成站点的自托管运营后台。</p>
+
+<p align="center">
+  用户注册 · 图片额度 · 兑换码 · 优惠码 · 邮箱验证 · 账号池 · 网页生图
+</p>
 
 <p align="center">
   <a href="https://github.com/1134189025/GenAPI">GitHub</a>
   ·
   <a href="./docs/feature-status.en.md">功能状态</a>
   ·
-  <a href="./docs/upstream-sse-conversation.md">上游流式协议说明</a>
+  <a href="./docs/upstream-sse-conversation.md">协议说明</a>
 </p>
 
 ## 项目定位
 
-Genapi 不是通用 OpenAI API 转发服务。当前版本已经关闭 `/v1/*` OpenAI 兼容外部接口，只保留网页端生图工作流。
+Genapi 是一个以网页生图为核心的自托管系统，目标是把 ChatGPT 官网图片能力包装成可运营、可分发、可控额度的图片生成站点。
 
-普通用户通过网页登录后使用 `/image` 生图；管理员通过后台维护用户、图片额度、兑换码、优惠码、SMTP 设置和 OpenAI 账号池。文本接口只作为内部能力保留，不对外提供用户 API 调用入口。
+它更接近一个“图片生成业务后台”，而不是传统 API 中转服务。当前版本已经关闭 `/v1/*` OpenAI 兼容外部接口，普通用户只能通过网页端使用生图能力。管理员负责维护用户、额度、兑换码、优惠码、邮箱验证、账号池和系统配置。
 
-## 主要功能
+适合的使用场景：
 
-- 网页生图工作台：支持文生图、图生图、多参考图编辑、多张图片生成和本地会话历史。
-- 用户系统：首次安装创建管理员，普通用户使用邮箱密码登录，JWT 会话鉴权。
-- 注册控制：支持注册开关、邮箱验证码、邮箱后缀白名单、邀请码和注册优惠码。
-- 图片额度：普通用户按图片张数扣减额度，管理员不受额度和并发限制。
-- 兑换码：管理员生成图片额度码、并发码、邀请码，用户登录后可兑换额度或并发。
-- 优惠码：注册时可选输入优惠码，按配置赠送图片额度并限制使用次数和有效期。
-- SMTP 邮件：支持配置发信服务器，验证码默认 15 分钟有效，发送冷却 60 秒。
-- 号池管理：支持账号导入、刷新、筛选、导出、代理配置、限流检测和无效 Token 清理。
-- sub2api 导入：可连接 sub2api 服务并批量导入 OpenAI OAuth 账号。
-- Docker 部署：提供生产 compose 和本地构建 compose。
+- 搭建私有图片生成站点，给固定用户或小范围用户使用。
+- 给会员、客户、群成员分配图片生成次数。
+- 通过兑换码、优惠码、邀请码完成手动售卖、活动发放或用户准入。
+- 把多个 OpenAI 账号集中到账号池中，由后台统一调度。
+- 给工作室、社群、团队、内部业务提供可控的网页生图入口。
 
-## 界面预览
+项目本身不内置支付系统。如果需要收费，可以配合第三方发卡平台、人工收款或自建支付系统，将“兑换码”作为交付物。
 
-文生图界面：
+## 商业化能力
 
-![文生图界面](assets/image.png)
+### 用户与权限
 
-图生图界面：
+- 首次启动通过 `/setup` 创建管理员。
+- 用户使用邮箱和密码登录，后端签发 JWT 会话。
+- 管理员可以创建、禁用、删除用户。
+- 管理员可以调整用户角色、图片额度和图片并发数。
+- 普通用户只能访问自己的生图工作台和兑换记录。
+- 管理员拥有账号池、用户、码管理、日志、系统设置等后台权限。
 
-![图生图界面](assets/image_edit.png)
+### 额度体系
 
-号池管理：
+- 图片额度按“生成图片张数”计算。
+- 普通用户每次生图会先预留额度，再按实际返回图片数结算。
+- 请求失败或没有返回图片时，会退回未使用额度。
+- 普通用户受图片并发限制，超限会返回 429。
+- 管理员不受图片额度和图片并发限制。
+- 文本相关内部能力不扣图片额度。
 
-![号池管理](assets/account_pool.png)
+这套规则适合直接做成“次数包”“会员赠送次数”“活动赠送次数”等业务模型。
+
+### 兑换码
+
+管理员可以批量生成一次性兑换码：
+
+- `image_quota`：兑换图片次数。
+- `concurrency`：提升图片并发数。
+- `invitation`：作为注册邀请码使用。
+
+用户登录后可在 `/redeem` 输入兑换码。兑换成功后，额度或并发立即写入用户账户。同一个码只能使用一次，后台可以查看状态和使用记录。
+
+典型商业用法：
+
+- 发卡平台售卖图片次数兑换码。
+- 社群活动发放限量兑换码。
+- 给代理或客户批量生成独立码。
+- 用邀请码控制注册入口，避免公开注册被滥用。
+
+### 优惠码
+
+优惠码用于注册阶段赠送图片额度，适合推广和活动。
+
+支持能力：
+
+- 设置注册赠送图片额度。
+- 设置最大使用次数。
+- 设置过期时间。
+- 禁用或删除优惠码。
+- 记录使用情况，避免无限领取。
+
+典型商业用法：
+
+- 新用户注册送额度。
+- 推广渠道专属码。
+- 节日活动码。
+- 小范围测试邀请。
+
+### 邮箱验证与注册控制
+
+注册系统支持：
+
+- 开启或关闭注册入口。
+- 开启或关闭邮箱验证码。
+- 设置邮箱后缀白名单。
+- 开启邀请码要求。
+- 开启优惠码注册赠送。
+- 配置站点名，让验证码邮件显示自定义品牌名。
+
+验证码默认 15 分钟有效，发送冷却默认 60 秒，错误次数超过限制后会失效。验证码只保存哈希，不保存明文。
+
+SMTP 支持常见邮箱服务。QQ 邮箱示例：
+
+- SMTP Host：`smtp.qq.com`
+- SMTP Port：`465`
+- SMTP Username：邮箱地址
+- SMTP Password：SMTP 授权码
+- SMTP From：可留空，默认使用 SMTP Username
+
+端口 `465` 使用 SSL，其他端口默认使用 STARTTLS。
+
+### 账号池运营
+
+Genapi 的账号池用于集中管理上游 OpenAI 账号，并为网页生图提供可用账号。
+
+支持能力：
+
+- access_token 导入。
+- 本地 CPA JSON 文件导入。
+- 远程 CPA 服务器导入。
+- sub2api 服务器导入。
+- 批量刷新账号状态。
+- 查看账号邮箱、类型、额度和恢复时间。
+- 自动检测限流账号并定时刷新。
+- 遇到 Token 失效类错误时清理无效 Token。
+- 支持 HTTP、HTTPS、SOCKS5、SOCKS5H 代理配置和代理测试。
+- 支持搜索、筛选、导出、手动编辑和批量维护。
+
+这部分适合做成后台运维能力：用户只看到网页生图入口，管理员在后台维护上游账号可用性。
+
+### 生图工作台
+
+用户侧核心入口是 `/image`。
+
+当前支持：
+
+- 文生图。
+- 图生图。
+- 多参考图编辑。
+- 多张图片生成。
+- 本地会话历史。
+- 图片结果回看、删除和清空。
+- 服务端图片缓存 URL。
+- 用户维度的生图历史隔离。
+
+支持的模型选项包括 `gpt-image-2`、`codex-gpt-image-2`、`auto` 以及若干 ChatGPT 官网相关模型别名。实际可用性取决于账号池中账号的权限、订阅和上游状态。
+
+### 日志与运营排查
+
+管理员可以查看系统日志和图片记录，用于排查：
+
+- 用户调用情况。
+- 生图失败原因。
+- 上游账号异常。
+- 代理连通性。
+- 图片生成记录。
+
+日志和运行时数据保存在本地 `data/` 目录，该目录默认不提交到 Git。
+
+### 可选注册辅助
+
+项目保留了注册机相关页面和接口，主要作为管理员内部辅助工具，用于补充账号池来源。它不是 Genapi 的核心商业能力，README 不展开说明。
 
 ## 快速部署
 
-### 1. 克隆项目
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/1134189025/GenAPI.git
 cd GenAPI
 ```
 
-### 2. 启动服务
+### 2. 启动 Docker 服务
 
 ```bash
 docker compose up -d
 ```
 
-默认端口：
+默认访问地址：
 
-- 宿主机访问：`http://localhost:3000`
-- 局域网访问：`http://<服务器局域网 IP>:3000`
-- 容器内服务端口：`80`
+- 本机：`http://localhost:3000`
+- 局域网：`http://<服务器局域网 IP>:3000`
 
-首次访问会进入 `/setup` 安装向导，创建第一个管理员账号。管理员创建完成后，后续统一使用邮箱、密码登录。
+首次访问会进入安装向导。创建管理员后，使用邮箱和密码登录后台。
 
-### 3. 常用管理入口
+### 3. 常用入口
 
-- 生图页面：`/image`
-- 用户兑换：`/redeem`
-- 管理员账号池：`/admin/accounts`
-- 管理员用户管理：`/admin/users`
-- 管理员兑换码：`/admin/redeem-codes`
-- 管理员优惠码：`/admin/promo-codes`
-- 管理员注册机：`/admin/register-machine`
-- 管理员设置：`/admin/settings`
+- `/setup`：首次安装。
+- `/login`：登录。
+- `/register`：用户注册。
+- `/image`：用户生图。
+- `/redeem`：用户兑换。
+- `/admin/accounts`：账号池。
+- `/admin/users`：用户管理。
+- `/admin/redeem-codes`：兑换码管理。
+- `/admin/promo-codes`：优惠码管理。
+- `/admin/settings`：系统和注册设置。
+- `/admin/logs`：日志。
+- `/admin/images`：图片记录。
+
+## 配置
+
+可以从示例文件创建本地环境配置：
+
+```bash
+cp .env.example .env
+```
+
+常用环境变量：
+
+- `JWT_SECRET`：JWT 签名密钥，生产环境建议手动设置。
+- `GENAPI_USER_DATABASE_URL`：用户系统数据库，默认 `data/users.db`。
+- `GENAPI_BASE_URL`：对外访问地址，用于生成图片 URL。
+- `STORAGE_BACKEND`：账号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
+- `DATABASE_URL`：账号池数据库地址。
+- `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
+
+运行时数据：
+
+- `data/users.db`：用户、额度、兑换码、优惠码、验证码等数据。
+- `data/jwt_hmac_secret`：自动生成的 JWT HMAC 密钥。
+- `data/accounts.json` 或数据库账号池：上游账号数据。
+- `data/logs.jsonl`：运行日志。
+
+这些文件包含敏感信息，不应提交到仓库。
 
 ## 本地开发
 
 ### 后端
-
-项目使用 Python 3.13 和 `uv`。
 
 ```bash
 uv sync
 uv run python main.py
 ```
 
-默认后端开发端口为 `8000`。
+默认后端端口为 `8000`。
 
 ### 前端
-
-项目使用 Next.js、React 和 Bun。
 
 ```bash
 cd web
@@ -100,7 +245,7 @@ bun install
 bun run dev
 ```
 
-前端开发服务默认监听 `3000`，并会根据当前访问主机名推导后端地址 `http://<host>:8000`。如需指定后端地址：
+前端默认端口为 `3000`。开发环境会根据当前访问主机推导后端地址 `http://<host>:8000`。如需手动指定：
 
 ```bash
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev
@@ -112,62 +257,13 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev
 docker compose -f docker-compose.local.yml up --build
 ```
 
-`docker-compose.local.yml` 会把容器发布到宿主机 `8000`，适合本机调试构建结果。
-
-## 配置说明
-
-可以复制 `.env.example` 并按需设置环境变量。
-
-```bash
-cp .env.example .env
-```
-
-常用环境变量：
-
-- `JWT_SECRET`：JWT 签名密钥，生产环境建议设置为至少 32 字节的随机字符串。
-- `GENAPI_USER_DATABASE_URL`：用户系统数据库地址，默认使用 `data/users.db`。
-- `GENAPI_BASE_URL`：生成图片 URL 时使用的外部访问地址。
-- `STORAGE_BACKEND`：号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
-- `DATABASE_URL`：账号池数据库地址，`STORAGE_BACKEND=sqlite/postgres` 时使用。
-- `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
-
-运行时敏感数据默认保存在 `data/` 目录，包括用户数据库、JWT 密钥、日志和账号池数据。该目录已被 `.gitignore` 排除，不应提交到 Git 仓库。
-
-## 邮箱验证码
-
-在管理员设置页配置 SMTP 后，注册页可以发送邮箱验证码。常见 QQ 邮箱配置示例：
-
-- SMTP Host：`smtp.qq.com`
-- SMTP Port：`465`
-- SMTP Username：你的 QQ 邮箱地址
-- SMTP Password：QQ 邮箱 SMTP 授权码，不是登录密码
-- SMTP From：可留空，默认使用 SMTP Username
-
-端口 `465` 使用 SSL，其他端口默认使用 STARTTLS。验证码邮件会使用站点名作为发信显示名，站点名可在管理员设置中修改。
-
-## 用户与额度规则
-
-- 管理员不受图片额度和图片并发限制。
-- 普通用户调用网页生图会按生成图片数量扣减额度。
-- 生图请求采用先预留、后结算逻辑；失败或未实际返回图片时会退回未生成部分额度。
-- 图片并发超限会返回 429。
-- 额度不足会返回 OpenAI 兼容的 `insufficient_quota` 错误结构。
-- 文本相关能力不扣图片额度。
-
-## 账号池导入方式
-
-管理员可以在后台导入和维护 OpenAI 账号：
-
-- 本地 CPA JSON 文件导入
-- 远程 CPA 服务器导入
-- sub2api 服务器导入
-- access_token 手动导入
-
-导入后可在账号池页面刷新账号状态、查看额度恢复时间、筛选账号类型、导出数据、配置代理并清理失效 Token。
+本地构建 compose 默认把服务发布到宿主机 `8000`。
 
 ## 接口边界
 
-当前版本保留网页内部接口，例如：
+Genapi 当前只保留网页内部接口。
+
+主要内部接口包括：
 
 - `POST /api/image/generations`
 - `POST /api/image/edits`
@@ -175,12 +271,17 @@ cp .env.example .env
 - `POST /api/auth/register`
 - `POST /api/auth/send-verify-code`
 - `GET /api/auth/me`
+- `POST /api/redeem`
+- `GET /api/redeem/history`
+- `GET /api/admin/users`
+- `POST /api/admin/redeem-codes/generate`
+- `GET /api/admin/promo-codes`
 
-`/v1/*` OpenAI 兼容外部 API 已下线，直接访问会返回 `404 Not Found`。如果需要重新开放外部 API，应先重新设计权限、额度、审计和滥用控制，不建议直接恢复旧接口。
+`/v1/*` OpenAI 兼容外部 API 已关闭，直接访问会返回 `404 Not Found`。如果要重新开放外部 API，需要重新设计独立的密钥体系、额度计费、审计日志和滥用控制。
 
 ## 验证命令
 
-后端测试：
+后端单元测试：
 
 ```bash
 uv run python -m unittest discover -s test
@@ -195,28 +296,27 @@ bun run typecheck
 bun run build
 ```
 
-## 安全注意事项
+## 部署建议
 
-> [!WARNING]
-> 本项目涉及对 ChatGPT 官网相关能力的逆向研究，仅供个人学习、技术研究与非商业性技术交流使用。
-
-- 不要把 `data/`、`.env`、`config.json`、数据库文件、JWT 密钥、SMTP 授权码、OpenAI Token 提交到 Git 仓库。
-- 不建议直接公网裸露部署；如需公网访问，请自行配置 HTTPS、反向代理、访问控制和备份策略。
-- 不要使用你的重要 OpenAI 账号或高价值账号测试号池能力。
-- 使用者应自行承担账号限制、封禁、数据泄露、违规使用等风险。
+- 生产环境建议设置 `JWT_SECRET`。
+- 生产环境建议使用 SQLite 或 PostgreSQL 存储用户数据。
+- 定期备份 `data/` 或外部数据库。
+- 不要把 `data/`、`.env`、`config.json`、SMTP 授权码、OpenAI Token、JWT 密钥提交到 Git。
+- 公网部署建议使用 HTTPS、反向代理、防火墙和访问控制。
+- 账号池中的上游账号建议按用途分组管理，不要使用重要账号测试。
 
 ## 目录结构
 
 ```text
 .
 ├── api/                 # FastAPI 路由
-├── services/            # 账号池、用户、邮箱、额度、生图等服务逻辑
+├── services/            # 用户、额度、邮箱、账号池、生图等服务逻辑
 ├── utils/               # 通用工具
-├── test/                # 后端单元测试
+├── test/                # 后端测试
 ├── web/                 # Next.js 前端
-├── docs/                # 项目文档
-├── assets/              # README 截图资源
-├── data/                # 运行时数据，已忽略
+├── docs/                # 补充文档
+├── assets/              # 静态资源
+├── data/                # 运行时数据，默认忽略
 ├── Dockerfile
 ├── docker-compose.yml
 └── docker-compose.local.yml
