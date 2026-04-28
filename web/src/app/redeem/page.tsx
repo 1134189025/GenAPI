@@ -1,0 +1,372 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, BadgeCheck, Gift, History, LoaderCircle, Sparkles, TicketCheck, Zap } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { fetchMe, fetchRedeemHistory, redeemCode, type ManagedUser, type RedeemCode } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { useAuthGuard } from "@/lib/use-auth-guard";
+
+type RedeemFeedback = {
+  type: "success" | "error";
+  title: string;
+  message: string;
+};
+
+function typeLabel(type: string) {
+  if (type === "image_quota") return "图片额度";
+  if (type === "concurrency") return "图片并发";
+  return "邀请码";
+}
+
+function quotaLabel(user: ManagedUser | null) {
+  if (!user) return "—";
+  return user.role === "admin" ? "不限" : String(user.image_quota ?? 0);
+}
+
+function concurrencyLabel(user: ManagedUser | null) {
+  if (!user) return "—";
+  return user.role === "admin" ? "不限" : String(user.image_concurrency ?? 0);
+}
+
+function formatHistoryTime(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+export default function RedeemPage() {
+  const { isCheckingAuth, session } = useAuthGuard();
+  const didLoadRef = useRef(false);
+  const [user, setUser] = useState<ManagedUser | null>(null);
+  const [items, setItems] = useState<RedeemCode[]>([]);
+  const [code, setCode] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<RedeemFeedback | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [me, history] = await Promise.all([fetchMe(), fetchRedeemHistory()]);
+      setUser(me.user);
+      setItems(history.items);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载兑换信息失败";
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (didLoadRef.current) return;
+    didLoadRef.current = true;
+    void load();
+  }, []);
+
+  const handleRedeem = async () => {
+    const normalizedCode = code.trim();
+    if (!normalizedCode) {
+      const message = "请输入兑换码";
+      setFeedback({ type: "error", title: "缺少兑换码", message });
+      toast.error(message);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      const data = await redeemCode(normalizedCode);
+      setUser(data.user);
+      setCode("");
+      const history = await fetchRedeemHistory();
+      setItems(history.items);
+      const rewardLabel = `${typeLabel(data.redeem.type)} +${data.redeem.value}`;
+      setFeedback({
+        type: "success",
+        title: "兑换成功",
+        message: `${rewardLabel} 已到账。当前图片额度 ${quotaLabel(data.user)}，图片并发 ${concurrencyLabel(data.user)}。`,
+      });
+      toast.success("兑换成功");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "兑换失败";
+      setFeedback({ type: "error", title: "兑换失败", message });
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isCheckingAuth || !session) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <LoaderCircle className="size-5 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 pb-8">
+      <div className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 p-5 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.22em] text-amber-700">
+              <Gift className="size-3.5" />
+              Redeem Center
+            </div>
+            <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换图片额度与并发能力</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。图片额度码和并发码可在这里使用，邀请码仍仅用于注册流程。
+            </p>
+          </div>
+          <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-4 lg:w-[360px]">
+            <div className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Account State</div>
+            <div className="mt-2 text-lg font-black text-slate-950">{session.role === "admin" ? "管理员" : "普通用户"}</div>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              兑换成功后表单下方会显示结果状态，统计卡和历史列表会同步刷新。
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <RedeemStatCard
+            label="图片额度"
+            value={isLoading ? "加载中..." : quotaLabel(user)}
+            helper="可用于生成或编辑图片"
+            icon={<Sparkles className="size-5" />}
+            tone="teal"
+          />
+          <RedeemStatCard
+            label="图片并发"
+            value={isLoading ? "加载中..." : concurrencyLabel(user)}
+            helper="账号允许的同时处理能力"
+            icon={<Zap className="size-5" />}
+            tone="amber"
+          />
+          <RedeemStatCard
+            label="当前活跃请求"
+            value={user?.active_image_requests ?? 0}
+            helper="后端记录的正在处理图片请求"
+            icon={<LoaderCircle className={cn("size-5", (user?.active_image_requests ?? 0) > 0 && "animate-spin")} />}
+            tone={(user?.active_image_requests ?? 0) > 0 ? "blue" : "slate"}
+          />
+          <RedeemStatCard
+            label="兑换记录"
+            value={isLoading ? "加载中..." : items.length}
+            helper="当前账号历史记录"
+            icon={<History className="size-5" />}
+            tone="slate"
+          />
+        </div>
+      </div>
+
+      {loadError ? (
+        <FeedbackBanner
+          feedback={{
+            type: "error",
+            title: "加载失败",
+            message: loadError,
+          }}
+          action={
+            <Button
+              variant="outline"
+              className="h-9 rounded-xl border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+              onClick={() => void load()}
+            >
+              重试
+            </Button>
+          }
+        />
+      ) : null}
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+          <div className="border-b border-slate-200/70 p-5 sm:p-6">
+            <div className="text-[11px] font-black uppercase tracking-[0.22em] text-teal-600">Redeem Form</div>
+            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">输入兑换码</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">兑换码会去除首尾空格后提交，成功后会刷新额度和并发。</p>
+          </div>
+
+          <div className="space-y-5 p-5 sm:p-6">
+            {feedback ? <FeedbackBanner feedback={feedback} /> : null}
+
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <Input
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void handleRedeem();
+                }}
+                placeholder="IMG-..."
+                className="h-12 rounded-2xl border-slate-200 bg-white font-mono text-base font-bold uppercase tracking-[0.08em] text-slate-950 placeholder:font-sans placeholder:normal-case placeholder:tracking-normal focus-visible:ring-teal-500/30"
+              />
+              <Button
+                className="h-12 rounded-2xl bg-slate-950 px-6 font-black text-white shadow-[0_20px_50px_-26px_rgba(15,23,42,0.9)] hover:bg-teal-700"
+                disabled={isSubmitting}
+                onClick={() => void handleRedeem()}
+              >
+                {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <TicketCheck className="size-4" />}
+                兑换
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <RedeemHint title="图片额度码" description="增加可用图片请求额度。" tone="teal" />
+              <RedeemHint title="并发码" description="提升同时处理图片请求能力。" tone="amber" />
+              <RedeemHint title="邀请码" description="仅注册时使用，不在这里兑换。" tone="slate" />
+            </div>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+          <div className="flex flex-col gap-3 border-b border-slate-200/70 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.22em] text-teal-600">History</div>
+              <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">兑换记录</h2>
+              <p className="mt-1 text-sm text-slate-500">最近兑换会显示在这里，便于确认成功状态。</p>
+            </div>
+            <Badge variant="secondary" className="w-fit rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+              {items.length} 条记录
+            </Badge>
+          </div>
+
+          <div className="space-y-3 p-5 sm:p-6">
+            {isLoading ? (
+              <div className="flex min-h-[220px] items-center justify-center rounded-[26px] bg-slate-50 text-slate-400">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="rounded-[26px] border border-dashed border-slate-300 bg-slate-50/80 px-6 py-10 text-center text-sm leading-6 text-slate-500">
+                暂无兑换记录。成功兑换后会生成历史卡片。
+              </div>
+            ) : (
+              items.map((item) => <RedeemHistoryItem key={item.id} item={item} />)
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function RedeemStatCard({
+  label,
+  value,
+  helper,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  helper: string;
+  icon: React.ReactNode;
+  tone: "teal" | "amber" | "blue" | "slate";
+}) {
+  return (
+    <div className="rounded-[24px] border border-slate-200/70 bg-white/80 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">{label}</div>
+          <div className="mt-2 text-2xl font-black tracking-tight text-slate-950">{value}</div>
+        </div>
+        <div
+          className={cn(
+            "grid size-11 shrink-0 place-items-center rounded-2xl",
+            tone === "teal" && "bg-teal-50 text-teal-700",
+            tone === "amber" && "bg-amber-50 text-amber-700",
+            tone === "blue" && "bg-blue-50 text-blue-700",
+            tone === "slate" && "bg-slate-100 text-slate-600",
+          )}
+        >
+          {icon}
+        </div>
+      </div>
+      <div className="mt-3 text-xs font-semibold leading-5 text-slate-500">{helper}</div>
+    </div>
+  );
+}
+
+function FeedbackBanner({ feedback, action }: { feedback: RedeemFeedback; action?: React.ReactNode }) {
+  const success = feedback.type === "success";
+  const Icon = success ? BadgeCheck : AlertTriangle;
+
+  return (
+    <div
+      role={success ? "status" : "alert"}
+      className={cn(
+        "flex flex-col gap-3 rounded-[24px] border px-4 py-4 sm:flex-row sm:items-start sm:justify-between",
+        success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800",
+      )}
+    >
+      <div className="flex gap-3">
+        <div className={cn("mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-white/70", success ? "text-emerald-700" : "text-rose-700")}>
+          <Icon className="size-5" />
+        </div>
+        <div>
+          <div className="text-sm font-black">{feedback.title}</div>
+          <p className="mt-1 text-sm leading-6 opacity-85">{feedback.message}</p>
+        </div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function RedeemHint({ title, description, tone }: { title: string; description: string; tone: "teal" | "amber" | "slate" }) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-4 py-3",
+        tone === "teal" && "border-teal-100 bg-teal-50 text-teal-800",
+        tone === "amber" && "border-amber-100 bg-amber-50 text-amber-800",
+        tone === "slate" && "border-slate-200 bg-slate-50 text-slate-700",
+      )}
+    >
+      <div className="text-sm font-black">{title}</div>
+      <p className="mt-1 text-xs leading-5 opacity-75">{description}</p>
+    </div>
+  );
+}
+
+function RedeemHistoryItem({ item }: { item: RedeemCode }) {
+  const typeTone =
+    item.type === "image_quota" ? "bg-teal-50 text-teal-700" : item.type === "concurrency" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
+
+  return (
+    <article className="flex flex-col gap-4 rounded-[24px] border border-slate-200/70 bg-white/90 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-500">
+          <TicketCheck className="size-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-mono text-sm font-black tracking-[0.08em] text-slate-950">{item.code_preview}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {item.used ? "已使用" : "未使用"} · {formatHistoryTime(item.used_at || item.created_at)}
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Badge variant="secondary" className={cn("rounded-full px-3 py-1 font-bold", typeTone)}>
+          {typeLabel(item.type)}
+        </Badge>
+        <span className="rounded-full bg-slate-950 px-3 py-1 text-sm font-black text-white">+{item.value}</span>
+      </div>
+    </article>
+  );
+}
