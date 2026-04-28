@@ -30,10 +30,12 @@ export function getRedeemCodeStatus(
 export function getRedeemCodeTypeLabel(type: RedeemCodeType) {
   if (type === "image_quota") return "图片额度";
   if (type === "concurrency") return "图片并发";
+  if (type === "membership") return "会员兑换";
   return "邀请码";
 }
 
-export function getRedeemValueLabel(item: Pick<RedeemCode, "type" | "value">) {
+export function getRedeemValueLabel(item: Pick<RedeemCode, "type" | "value" | "membership_plan_id">) {
+  if (item.type === "membership") return "会员套餐";
   if (item.type === "invitation") return "注册邀请";
   return `+${item.value}`;
 }

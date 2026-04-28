@@ -2,6 +2,7 @@ import type { AuthRole } from "@/store/auth";
 
 export type NavIcon =
   | "brush"
+  | "crown"
   | "gift"
   | "users"
   | "ticket"
@@ -40,9 +41,15 @@ const userNavigation: NavGroup[] = [
         icon: "brush",
       },
       {
+        href: "/membership",
+        label: "会员中心",
+        description: "会员状态、套餐和周期额度",
+        icon: "crown",
+      },
+      {
         href: "/redeem",
         label: "兑换中心",
-        description: "兑换图片额度和并发能力",
+        description: "兑换图片额度、并发和会员码",
         icon: "gift",
       },
     ],
@@ -63,8 +70,14 @@ const adminNavigation: NavGroup[] = [
       {
         href: "/admin/redeem-codes",
         label: "兑换码",
-        description: "图片额度、并发和邀请码",
+        description: "图片额度、并发、会员和邀请码",
         icon: "ticket",
+      },
+      {
+        href: "/admin/membership-plans",
+        label: "会员套餐",
+        description: "会员套餐、周期额度和排序",
+        icon: "crown",
       },
       {
         href: "/admin/promo-codes",

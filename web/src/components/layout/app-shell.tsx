@@ -7,6 +7,7 @@ import {
   Bot,
   Brush,
   ChevronLeft,
+  Crown,
   Gift,
   ImageIcon,
   LogOut,
@@ -39,6 +40,7 @@ import {
 
 const iconMap: Record<NavIcon, React.ComponentType<{ className?: string }>> = {
   brush: Brush,
+  crown: Crown,
   gift: Gift,
   users: Users,
   ticket: Ticket,

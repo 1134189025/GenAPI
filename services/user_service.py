@@ -40,7 +40,7 @@ from services.config import DATA_DIR
 Base = declarative_base()
 
 UserRole = Literal["admin", "user"]
-RedeemCodeType = Literal["image_quota", "concurrency", "invitation"]
+RedeemCodeType = Literal["image_quota", "concurrency", "invitation", "membership"]
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 JWT_ALGORITHM = "HS256"
@@ -151,6 +151,8 @@ class RedeemCodeModel(Base):
     code_suffix = Column(String(8), nullable=False)
     type = Column(String(32), nullable=False, index=True)
     value = Column(Integer, nullable=False, default=0)
+    membership_plan_id = Column(String(36), ForeignKey("membership_plans.id"), nullable=True, index=True)
+    metadata_json = Column("metadata", Text, nullable=False, default="")
     enabled = Column(Boolean, nullable=False, default=True)
     used_by_user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     used_at = Column(DateTime(timezone=True), nullable=True)
@@ -184,6 +186,42 @@ class PromoCodeUsageModel(Base):
     used_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class MembershipPlanModel(Base):
+    __tablename__ = "membership_plans"
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(80), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    duration_days = Column(Integer, nullable=False, default=1)
+    period_days = Column(Integer, nullable=False, default=1)
+    period_image_quota = Column(Integer, nullable=False, default=1)
+    enabled = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class UserMembershipModel(Base):
+    __tablename__ = "user_memberships"
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    plan_id = Column(String(36), ForeignKey("membership_plans.id"), nullable=True, index=True)
+    plan_name = Column(String(80), nullable=False, default="")
+    status = Column(String(32), nullable=False, default="inactive", index=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    current_period_started_at = Column(DateTime(timezone=True), nullable=True)
+    current_period_ends_at = Column(DateTime(timezone=True), nullable=True)
+    member_image_quota = Column(Integer, nullable=False, default=0)
+    period_image_quota = Column(Integer, nullable=False, default=0)
+    duration_days = Column(Integer, nullable=False, default=0)
+    period_days = Column(Integer, nullable=False, default=0)
+    source_redeem_code_id = Column(String(36), ForeignKey("redeem_codes.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class ImageUsageEventModel(Base):
     __tablename__ = "image_usage_events"
 
@@ -193,6 +231,14 @@ class ImageUsageEventModel(Base):
     requested_count = Column(Integer, nullable=False, default=0)
     actual_count = Column(Integer, nullable=False, default=0)
     refunded_count = Column(Integer, nullable=False, default=0)
+    member_reserved_count = Column(Integer, nullable=False, default=0)
+    regular_reserved_count = Column(Integer, nullable=False, default=0)
+    membership_source_redeem_code_id = Column(String(36), nullable=True, index=True)
+    membership_activation_key = Column(String(255), nullable=False, default="")
+    member_actual_count = Column(Integer, nullable=False, default=0)
+    regular_actual_count = Column(Integer, nullable=False, default=0)
+    member_refunded_count = Column(Integer, nullable=False, default=0)
+    regular_refunded_count = Column(Integer, nullable=False, default=0)
     status = Column(String(32), nullable=False, default="reserved", index=True)
     error = Column(Text, nullable=False, default="")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
@@ -234,6 +280,10 @@ class QuotaReservation:
     event_id: str
     user_id: str
     requested_count: int
+    member_reserved_count: int = 0
+    regular_reserved_count: int = 0
+    membership_source_redeem_code_id: str = ""
+    membership_activation_key: str = ""
     bypass: bool = False
 
 
@@ -274,6 +324,15 @@ class UserService:
         inspector = inspect(self.engine)
         if "users" not in inspector.get_table_names():
             return
+
+        def add_column(table: str, name: str, column_type, suffix: str = "") -> None:
+            columns = {column["name"] for column in inspector.get_columns(table)}
+            if name in columns:
+                return
+            compiled = column_type.compile(dialect=self.engine.dialect)
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {compiled} {suffix}".strip())
+
         user_columns = {column["name"] for column in inspector.get_columns("users")}
         if "token_version" not in user_columns:
             column_type = Integer().compile(dialect=self.engine.dialect)
@@ -281,6 +340,22 @@ class UserService:
                 connection.exec_driver_sql(
                     f"ALTER TABLE users ADD COLUMN token_version {column_type} NOT NULL DEFAULT 0"
                 )
+        table_names = set(inspector.get_table_names())
+        if "redeem_codes" in table_names:
+            add_column("redeem_codes", "membership_plan_id", String(36))
+            add_column("redeem_codes", "metadata", Text(), "NOT NULL DEFAULT ''")
+        if "image_usage_events" in table_names:
+            for name in {
+                "member_reserved_count",
+                "regular_reserved_count",
+                "member_actual_count",
+                "regular_actual_count",
+                "member_refunded_count",
+                "regular_refunded_count",
+            }:
+                add_column("image_usage_events", name, Integer(), "NOT NULL DEFAULT 0")
+            add_column("image_usage_events", "membership_source_redeem_code_id", String(36))
+            add_column("image_usage_events", "membership_activation_key", String(255), "NOT NULL DEFAULT ''")
 
     def _read_jwt_secret_file(self) -> str:
         try:
@@ -341,6 +416,28 @@ class UserService:
                     self._jwt_secret()
             if legacy_jwt_secret is not None:
                 session.delete(legacy_jwt_secret)
+                changed = True
+            if session.query(MembershipPlanModel).count() == 0:
+                defaults = [
+                    ("日卡", "激活后 1 天内可用，每周期 1 天刷新额度。", 1, 1, 10, 10),
+                    ("周卡", "激活后 7 天内可用，每周期 7 天刷新额度。", 7, 7, 80, 20),
+                    ("月卡", "激活后 30 天内可用，每周期 30 天刷新额度。", 30, 30, 360, 30),
+                ]
+                for name, description, duration_days, period_days, period_quota, sort_order in defaults:
+                    session.add(
+                        MembershipPlanModel(
+                            id=str(uuid.uuid4()),
+                            name=name,
+                            description=description,
+                            duration_days=duration_days,
+                            period_days=period_days,
+                            period_image_quota=period_quota,
+                            enabled=True,
+                            sort_order=sort_order,
+                            created_at=utc_now(),
+                            updated_at=utc_now(),
+                        )
+                    )
                 changed = True
             if changed:
                 session.commit()
@@ -506,14 +603,86 @@ class UserService:
     def token_hash(token: str) -> str:
         return hashlib.sha256(clean_string(token).encode("utf-8")).hexdigest()
 
-    def _serialize_user(self, user: UserModel) -> dict[str, object]:
+    def _serialize_membership(self, membership: UserMembershipModel | None) -> dict[str, object] | None:
+        if membership is None:
+            return None
+        return {
+            "id": membership.id,
+            "plan_id": membership.plan_id,
+            "plan_name": membership.plan_name,
+            "status": membership.status,
+            "member_image_quota": int(membership.member_image_quota or 0),
+            "period_image_quota": int(membership.period_image_quota or 0),
+            "duration_days": int(membership.duration_days or 0),
+            "period_days": int(membership.period_days or 0),
+            "activated_at": iso(membership.activated_at),
+            "expires_at": iso(membership.expires_at),
+            "current_period_started_at": iso(membership.current_period_started_at),
+            "current_period_ends_at": iso(membership.current_period_ends_at),
+        }
+
+    def _membership_activation_key(self, membership: UserMembershipModel | None) -> str:
+        if membership is None:
+            return ""
+        return "|".join(
+            [
+                clean_string(membership.id),
+                clean_string(membership.plan_id),
+                iso(membership.activated_at) or "",
+                iso(membership.expires_at) or "",
+            ]
+        )
+
+    def _refresh_user_membership(self, session, user_id: str, now: datetime | None = None) -> UserMembershipModel | None:
+        current = now or utc_now()
+        membership = session.query(UserMembershipModel).filter(UserMembershipModel.user_id == clean_string(user_id)).one_or_none()
+        if membership is None:
+            return None
+        expires_at = as_utc(membership.expires_at)
+        if expires_at is None or expires_at <= current:
+            if membership.status != "expired" or int(membership.member_image_quota or 0) != 0:
+                membership.status = "expired"
+                membership.member_image_quota = 0
+                membership.updated_at = current
+                session.flush()
+            return membership
+        period_days = max(1, int(membership.period_days or 1))
+        period_quota = max(0, int(membership.period_image_quota or 0))
+        period_start = as_utc(membership.current_period_started_at) or as_utc(membership.activated_at) or current
+        period_end = as_utc(membership.current_period_ends_at) or min(period_start + timedelta(days=period_days), expires_at)
+        changed = False
+        while period_end <= current and period_end < expires_at:
+            period_start = period_end
+            period_end = min(period_start + timedelta(days=period_days), expires_at)
+            changed = True
+        if changed or membership.status != "active":
+            membership.status = "active"
+            membership.current_period_started_at = period_start
+            membership.current_period_ends_at = period_end
+            membership.member_image_quota = period_quota
+            membership.updated_at = current
+            session.flush()
+        return membership
+
+    def _serialize_user(self, user: UserModel, membership: UserMembershipModel | None = None) -> dict[str, object]:
+        membership_payload = self._serialize_membership(membership)
+        member_quota = int(membership.member_image_quota or 0) if membership is not None and membership.status == "active" else 0
+        regular_quota = int(user.image_quota or 0)
         return {
             "id": user.id,
             "email": user.email,
             "name": user.email,
             "role": user.role,
             "enabled": bool(user.enabled),
-            "image_quota": int(user.image_quota or 0),
+            "image_quota": regular_quota,
+            "member_image_quota": member_quota,
+            "total_image_quota": regular_quota + member_quota,
+            "membership": membership_payload,
+            "membership_status": str(membership.status) if membership is not None else "inactive",
+            "membership_plan_id": membership.plan_id if membership is not None else None,
+            "membership_plan_name": membership.plan_name if membership is not None else "",
+            "membership_expires_at": iso(membership.expires_at) if membership is not None else None,
+            "membership_period_ends_at": iso(membership.current_period_ends_at) if membership is not None else None,
             "image_concurrency": int(user.image_concurrency or 0),
             "active_image_requests": int(user.active_image_requests or 0),
             "created_at": iso(user.created_at),
@@ -560,7 +729,9 @@ class UserService:
                 return None
             if int(user.token_version or 0) != token_version:
                 return None
-            return self._serialize_user(user)
+            membership = self._refresh_user_membership(session, user.id, now)
+            session.commit()
+            return self._serialize_user(user, membership)
 
     def revoke_token(self, token: str) -> None:
         candidate = clean_string(token)
@@ -620,13 +791,18 @@ class UserService:
                 raise UserServiceError("user is disabled", status_code=403, code="user_disabled")
             user.last_login_at = utc_now()
             user.updated_at = utc_now()
+            membership = self._refresh_user_membership(session, user.id, user.updated_at)
             session.commit()
-            return {"user": self._serialize_user(user), "token": self.create_token(user)}
+            return {"user": self._serialize_user(user, membership), "token": self.create_token(user)}
 
     def get_user(self, user_id: str) -> dict[str, object] | None:
         with self.Session() as session:
             user = session.get(UserModel, clean_string(user_id))
-            return self._serialize_user(user) if user is not None else None
+            if user is None:
+                return None
+            membership = self._refresh_user_membership(session, user.id)
+            session.commit()
+            return self._serialize_user(user, membership)
 
     def list_users(self, query: str = "") -> list[dict[str, object]]:
         normalized_query = normalize_email(query)
@@ -634,7 +810,13 @@ class UserService:
             q = session.query(UserModel).order_by(UserModel.created_at.desc())
             if normalized_query:
                 q = q.filter(UserModel.email.contains(normalized_query))
-            return [self._serialize_user(user) for user in q.all()]
+            users = q.all()
+            memberships = {row.user_id: row for row in session.query(UserMembershipModel).all()}
+            for user in users:
+                if user.id in memberships:
+                    self._refresh_user_membership(session, user.id)
+            session.commit()
+            return [self._serialize_user(user, memberships.get(user.id)) for user in users]
 
     def create_user(
         self,
@@ -726,6 +908,119 @@ class UserService:
                 session.rollback()
                 raise UserServiceError("email already exists", status_code=409, code="duplicate_email") from exc
             return self._serialize_user(user)
+
+    def _normalize_membership_plan_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        partial: bool = False,
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        if "name" in payload or not partial:
+            name = clean_string(payload.get("name"))
+            if not name:
+                raise UserServiceError("membership plan name is required")
+            if len(name) > 80:
+                raise UserServiceError("membership plan name is too long")
+            values["name"] = name
+        if "description" in payload or not partial:
+            values["description"] = clean_string(payload.get("description"))
+        if "duration_days" in payload or not partial:
+            duration_days = max(1, int(payload.get("duration_days") or 1))
+            values["duration_days"] = duration_days
+        if "period_days" in payload or not partial:
+            period_days = max(1, int(payload.get("period_days") or 1))
+            values["period_days"] = period_days
+        if "period_image_quota" in payload or not partial:
+            values["period_image_quota"] = max(0, int(payload.get("period_image_quota") or 0))
+        if "enabled" in payload or not partial:
+            values["enabled"] = bool(payload.get("enabled", True))
+        if "sort_order" in payload or not partial:
+            values["sort_order"] = int(payload.get("sort_order") or 0)
+        duration = int(values.get("duration_days", payload.get("duration_days") or 1) or 1)
+        period = int(values.get("period_days", payload.get("period_days") or 1) or 1)
+        if period > duration:
+            raise UserServiceError("period days cannot exceed duration days")
+        return values
+
+    def _serialize_membership_plan(self, row: MembershipPlanModel) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "description": row.description,
+            "duration_days": int(row.duration_days or 0),
+            "period_days": int(row.period_days or 0),
+            "period_image_quota": int(row.period_image_quota or 0),
+            "enabled": bool(row.enabled),
+            "sort_order": int(row.sort_order or 0),
+            "created_at": iso(row.created_at),
+            "updated_at": iso(row.updated_at),
+        }
+
+    def list_membership_plans(self, *, public_only: bool = False) -> list[dict[str, object]]:
+        with self.Session() as session:
+            query = session.query(MembershipPlanModel)
+            if public_only:
+                query = query.filter(MembershipPlanModel.enabled.is_(True))
+            rows = query.order_by(MembershipPlanModel.sort_order.asc(), MembershipPlanModel.created_at.asc()).all()
+            return [self._serialize_membership_plan(row) for row in rows]
+
+    def get_user_membership(self, user_id: str) -> dict[str, object]:
+        with self.Session() as session:
+            user = session.get(UserModel, clean_string(user_id))
+            if user is None or not bool(user.enabled):
+                raise UserServiceError("user not found", status_code=404, code="not_found")
+            membership = self._refresh_user_membership(session, user.id)
+            session.commit()
+            return {
+                "membership": self._serialize_membership(membership),
+                "user": self._serialize_user(user, membership),
+            }
+
+    def create_membership_plan(self, payload: dict[str, object]) -> dict[str, object]:
+        values = self._normalize_membership_plan_payload(payload)
+        now = utc_now()
+        row = MembershipPlanModel(
+            id=str(uuid.uuid4()),
+            created_at=now,
+            updated_at=now,
+            **values,
+        )
+        with self.Session() as session:
+            session.add(row)
+            session.commit()
+            return self._serialize_membership_plan(row)
+
+    def update_membership_plan(self, plan_id: str, updates: dict[str, object]) -> dict[str, object]:
+        with self.Session() as session:
+            row = session.get(MembershipPlanModel, clean_string(plan_id))
+            if row is None:
+                raise UserServiceError("membership plan not found", status_code=404, code="not_found")
+            payload = {
+                "duration_days": int(row.duration_days or 1),
+                "period_days": int(row.period_days or 1),
+                **dict(updates or {}),
+            }
+            values = self._normalize_membership_plan_payload(payload, partial=True)
+            for key, value in values.items():
+                setattr(row, key, value)
+            row.updated_at = utc_now()
+            session.commit()
+            return self._serialize_membership_plan(row)
+
+    def delete_membership_plan(self, plan_id: str) -> None:
+        with self.Session() as session:
+            row = session.get(MembershipPlanModel, clean_string(plan_id))
+            if row is None:
+                raise UserServiceError("membership plan not found", status_code=404, code="not_found")
+            used_by_code = session.query(RedeemCodeModel).filter(RedeemCodeModel.membership_plan_id == row.id).count()
+            used_by_membership = session.query(UserMembershipModel).filter(UserMembershipModel.plan_id == row.id).count()
+            if used_by_code or used_by_membership:
+                row.enabled = False
+                row.updated_at = utc_now()
+            else:
+                session.delete(row)
+            session.commit()
 
     def delete_user(self, user_id: str) -> None:
         with self._admin_mutation_lock, self.Session() as session:
@@ -1020,14 +1315,27 @@ class UserService:
         value: int = 0,
         count: int = 1,
         expires_at: datetime | None = None,
+        membership_plan_id: str | None = None,
     ) -> list[dict[str, object]]:
-        if type not in {"image_quota", "concurrency", "invitation"}:
+        if type not in {"image_quota", "concurrency", "invitation", "membership"}:
             raise UserServiceError("invalid redeem code type")
         normalized_count = max(1, min(500, int(count or 1)))
-        normalized_value = 0 if type == "invitation" else max(1, int(value or 1))
-        prefix_map = {"image_quota": "IMG", "concurrency": "CON", "invitation": "INV"}
+        normalized_value = 0 if type in {"invitation", "membership"} else max(1, int(value or 1))
+        prefix_map = {"image_quota": "IMG", "concurrency": "CON", "invitation": "INV", "membership": "MEM"}
         created: list[dict[str, object]] = []
         with self.Session() as session:
+            plan_snapshot = ""
+            normalized_plan_id: str | None = None
+            if type == "membership":
+                normalized_plan_id = clean_string(membership_plan_id)
+                if not normalized_plan_id:
+                    raise UserServiceError("membership plan is required")
+                plan = session.get(MembershipPlanModel, normalized_plan_id)
+                if plan is None:
+                    raise UserServiceError("membership plan not found", status_code=404, code="not_found")
+                if not bool(plan.enabled):
+                    raise UserServiceError("membership plan is disabled")
+                plan_snapshot = json_dumps(self._serialize_membership_plan(plan))
             for _ in range(normalized_count):
                 code = f"{prefix_map[type]}-{secrets.token_urlsafe(9).replace('-', '').replace('_', '').upper()[:12]}"
                 row = RedeemCodeModel(
@@ -1037,6 +1345,8 @@ class UserService:
                     code_suffix=code[-4:],
                     type=type,
                     value=normalized_value,
+                    membership_plan_id=normalized_plan_id,
+                    metadata_json=plan_snapshot,
                     enabled=True,
                     expires_at=expires_at,
                     created_at=utc_now(),
@@ -1052,6 +1362,8 @@ class UserService:
             "code_preview": f"{row.code_prefix}...{row.code_suffix}",
             "type": row.type,
             "value": int(row.value or 0),
+            "membership_plan_id": row.membership_plan_id,
+            "membership_plan": json_loads(row.metadata_json or "", {}) if row.type == "membership" else None,
             "enabled": bool(row.enabled),
             "used": bool(row.used_at),
             "used_by_user_id": row.used_by_user_id,
@@ -1084,6 +1396,12 @@ class UserService:
             row = session.get(RedeemCodeModel, clean_string(code_id))
             if row is None:
                 raise UserServiceError("redeem code not found", status_code=404, code="not_found")
+            session.query(UserMembershipModel).filter(
+                UserMembershipModel.source_redeem_code_id == row.id
+            ).update(
+                {UserMembershipModel.source_redeem_code_id: None},
+                synchronize_session=False,
+            )
             session.delete(row)
             session.commit()
 
@@ -1149,10 +1467,46 @@ class UserService:
                         updated_at=now,
                     )
                 )
+            elif row.type == "membership":
+                snapshot = json_loads(row.metadata_json or "", {})
+                if not isinstance(snapshot, dict) or not snapshot:
+                    plan = session.get(MembershipPlanModel, clean_string(row.membership_plan_id))
+                    if plan is None:
+                        raise UserServiceError("membership plan not found", status_code=404, code="not_found")
+                    snapshot = self._serialize_membership_plan(plan)
+                plan_name = clean_string(snapshot.get("name")) or "会员"
+                duration_days = max(1, int(snapshot.get("duration_days") or 1))
+                period_days = max(1, int(snapshot.get("period_days") or 1))
+                period_image_quota = max(0, int(snapshot.get("period_image_quota") or 0))
+                expires_at = now + timedelta(days=duration_days)
+                period_ends_at = min(now + timedelta(days=period_days), expires_at)
+                membership = (
+                    session.query(UserMembershipModel)
+                    .filter(UserMembershipModel.user_id == user.id)
+                    .one_or_none()
+                )
+                if membership is None:
+                    membership = UserMembershipModel(id=str(uuid.uuid4()), user_id=user.id, created_at=now)
+                    session.add(membership)
+                membership.plan_id = clean_string(row.membership_plan_id) or clean_string(snapshot.get("id")) or None
+                membership.plan_name = plan_name
+                membership.status = "active"
+                membership.activated_at = now
+                membership.expires_at = expires_at
+                membership.current_period_started_at = now
+                membership.current_period_ends_at = period_ends_at
+                membership.member_image_quota = period_image_quota
+                membership.period_image_quota = period_image_quota
+                membership.duration_days = duration_days
+                membership.period_days = period_days
+                membership.source_redeem_code_id = row.id
+                membership.updated_at = now
             session.commit()
             session.refresh(row)
             session.refresh(user)
-            return {"redeem": self._serialize_redeem_code(row), "user": self._serialize_user(user)}
+            membership = self._refresh_user_membership(session, user.id, now)
+            session.commit()
+            return {"redeem": self._serialize_redeem_code(row), "user": self._serialize_user(user, membership)}
 
     def redeem_history(self, user_id: str) -> list[dict[str, object]]:
         with self.Session() as session:
@@ -1260,41 +1614,64 @@ class UserService:
             return QuotaReservation(event_id="", user_id=clean_string(identity.get("id")), requested_count=requested_count, bypass=True)
         user_id = clean_string(identity.get("id"))
         amount = max(1, int(requested_count or 1))
-        with self.Session() as session:
+        with self._quota_lock, self.Session() as session:
             now = utc_now()
-            result = session.execute(
-                update(UserModel)
-                .where(
-                    UserModel.id == user_id,
-                    UserModel.enabled.is_(True),
-                    UserModel.image_quota >= amount,
-                    UserModel.active_image_requests < UserModel.image_concurrency,
-                )
-                .values(
-                    image_quota=UserModel.image_quota - amount,
-                    active_image_requests=UserModel.active_image_requests + 1,
-                    updated_at=now,
-                )
+            user = (
+                session.query(UserModel)
+                .filter(UserModel.id == user_id, UserModel.enabled.is_(True))
+                .with_for_update()
+                .one_or_none()
             )
-            if result.rowcount != 1:
-                session.rollback()
-                user = session.get(UserModel, user_id)
-                if user is None or not bool(user.enabled):
-                    raise UserServiceError("user not found", status_code=401, code="invalid_token")
-                if int(user.active_image_requests or 0) >= int(user.image_concurrency or 1):
-                    raise UserServiceError("image concurrency limit exceeded", status_code=429, code="rate_limit_exceeded")
+            if user is None:
+                raise UserServiceError("user not found", status_code=401, code="invalid_token")
+            if int(user.active_image_requests or 0) >= int(user.image_concurrency or 1):
+                raise UserServiceError("image concurrency limit exceeded", status_code=429, code="rate_limit_exceeded")
+            membership = self._refresh_user_membership(session, user_id, now)
+            member_available = (
+                int(membership.member_image_quota or 0)
+                if membership is not None and membership.status == "active"
+                else 0
+            )
+            regular_available = int(user.image_quota or 0)
+            if member_available + regular_available < amount:
                 raise UserServiceError("insufficient image quota", status_code=429, code="insufficient_quota")
+            member_to_use = min(member_available, amount)
+            regular_to_use = amount - member_to_use
+            membership_source_redeem_code_id = (
+                clean_string(membership.source_redeem_code_id)
+                if membership is not None and member_to_use
+                else ""
+            )
+            membership_activation_key = self._membership_activation_key(membership) if member_to_use else ""
+            if membership is not None and member_to_use:
+                membership.member_image_quota = max(0, int(membership.member_image_quota or 0) - member_to_use)
+                membership.updated_at = now
+            user.image_quota = max(0, int(user.image_quota or 0) - regular_to_use)
+            user.active_image_requests = int(user.active_image_requests or 0) + 1
+            user.updated_at = now
             event = ImageUsageEventModel(
                 id=str(uuid.uuid4()),
                 user_id=user_id,
                 endpoint=endpoint,
                 requested_count=amount,
+                member_reserved_count=member_to_use,
+                regular_reserved_count=regular_to_use,
+                membership_source_redeem_code_id=membership_source_redeem_code_id or None,
+                membership_activation_key=membership_activation_key,
                 status="reserved",
                 created_at=now,
             )
             session.add(event)
             session.commit()
-            return QuotaReservation(event_id=event.id, user_id=user_id, requested_count=amount)
+            return QuotaReservation(
+                event_id=event.id,
+                user_id=user_id,
+                requested_count=amount,
+                member_reserved_count=member_to_use,
+                regular_reserved_count=regular_to_use,
+                membership_source_redeem_code_id=membership_source_redeem_code_id,
+                membership_activation_key=membership_activation_key,
+            )
 
     def settle_image_quota(
         self,
@@ -1306,10 +1683,27 @@ class UserService:
     ) -> None:
         if reservation is None or reservation.bypass:
             return
-        with self.Session() as session:
-            now = utc_now()
+        now = utc_now()
+        with self._quota_lock, self.Session() as session:
             actual = max(0, min(int(actual_count or 0), int(reservation.requested_count or 0))) if success else 0
-            refund = max(0, int(reservation.requested_count or 0) - actual)
+            member_reserved = max(0, int(reservation.member_reserved_count or 0))
+            regular_reserved = max(0, int(reservation.regular_reserved_count or 0))
+            membership_source_redeem_code_id = clean_string(reservation.membership_source_redeem_code_id)
+            membership_activation_key = clean_string(reservation.membership_activation_key)
+            if member_reserved + regular_reserved <= 0:
+                event = session.get(ImageUsageEventModel, reservation.event_id)
+                if event is not None:
+                    member_reserved = max(0, int(event.member_reserved_count or 0))
+                    regular_reserved = max(0, int(event.regular_reserved_count or 0))
+                    membership_source_redeem_code_id = clean_string(event.membership_source_redeem_code_id)
+                    membership_activation_key = clean_string(event.membership_activation_key)
+            if member_reserved + regular_reserved <= 0:
+                regular_reserved = max(0, int(reservation.requested_count or 0))
+            member_actual = min(member_reserved, actual)
+            regular_actual = min(regular_reserved, max(0, actual - member_actual))
+            member_refund = max(0, member_reserved - member_actual)
+            regular_refund = max(0, regular_reserved - regular_actual)
+            refund = member_refund + regular_refund
             event_result = session.execute(
                 update(ImageUsageEventModel)
                 .where(
@@ -1320,6 +1714,10 @@ class UserService:
                 .values(
                     actual_count=actual,
                     refunded_count=refund,
+                    member_actual_count=member_actual,
+                    regular_actual_count=regular_actual,
+                    member_refunded_count=member_refund,
+                    regular_refunded_count=regular_refund,
                     status="success" if success else "failed",
                     error=clean_string(error),
                     settled_at=now,
@@ -1329,11 +1727,29 @@ class UserService:
                 session.rollback()
                 return
 
+            if member_refund:
+                membership = (
+                    session.query(UserMembershipModel)
+                    .filter(UserMembershipModel.user_id == reservation.user_id)
+                    .one_or_none()
+                )
+                if membership is not None:
+                    current_source = clean_string(membership.source_redeem_code_id)
+                    current_activation_key = self._membership_activation_key(membership)
+                    same_activation = bool(membership_activation_key) and current_activation_key == membership_activation_key
+                    legacy_same_source = (
+                        not membership_activation_key
+                        and bool(membership_source_redeem_code_id)
+                        and current_source == membership_source_redeem_code_id
+                    )
+                    if same_activation or legacy_same_source:
+                        membership.member_image_quota = int(membership.member_image_quota or 0) + member_refund
+                        membership.updated_at = now
             user_result = session.execute(
                 update(UserModel)
                 .where(UserModel.id == reservation.user_id)
                 .values(
-                    image_quota=UserModel.image_quota + refund,
+                    image_quota=UserModel.image_quota + regular_refund,
                     active_image_requests=case(
                         (UserModel.active_image_requests > 0, UserModel.active_image_requests - 1),
                         else_=0,

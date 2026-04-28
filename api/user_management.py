@@ -56,6 +56,7 @@ class AdminUserUpdateRequest(BaseModel):
 class RedeemCodeGenerateRequest(BaseModel):
     type: str
     value: int = 0
+    membership_plan_id: str = ""
     count: int = Field(default=1, ge=1, le=500)
     expires_at: str | None = None
 
@@ -67,6 +68,26 @@ class RedeemCodeUpdateRequest(BaseModel):
 
 class RedeemRequest(BaseModel):
     code: str
+
+
+class MembershipPlanCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    duration_days: int = 1
+    period_days: int = 1
+    period_image_quota: int = 0
+    enabled: bool = True
+    sort_order: int = 0
+
+
+class MembershipPlanUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    duration_days: int | None = None
+    period_days: int | None = None
+    period_image_quota: int | None = None
+    enabled: bool | None = None
+    sort_order: int | None = None
 
 
 class PromoCodeCreateRequest(BaseModel):
@@ -186,6 +207,18 @@ def create_router(app_version: str) -> APIRouter:
         user_service.revoke_token(token)
         return {"ok": True}
 
+    @router.get("/api/membership/plans")
+    async def public_membership_plans():
+        return {"items": user_service.list_membership_plans(public_only=True)}
+
+    @router.get("/api/membership/me")
+    async def my_membership(authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        try:
+            return user_service.get_user_membership(str(identity.get("id") or ""))
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
     @router.get("/api/admin/auth-settings")
     async def get_auth_settings(authorization: str | None = Header(default=None)):
         require_admin(authorization)
@@ -241,6 +274,45 @@ def create_router(app_version: str) -> APIRouter:
         except UserServiceError as exc:
             raise_user_error(exc)
 
+    @router.get("/api/admin/membership-plans")
+    async def admin_membership_plans(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return {"items": user_service.list_membership_plans()}
+
+    @router.post("/api/admin/membership-plans")
+    async def create_membership_plan(
+        body: MembershipPlanCreateRequest,
+        authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        try:
+            item = user_service.create_membership_plan(body.model_dump(mode="python"))
+            return {"item": item, "items": user_service.list_membership_plans()}
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
+    @router.patch("/api/admin/membership-plans/{plan_id}")
+    async def update_membership_plan(
+        plan_id: str,
+        body: MembershipPlanUpdateRequest,
+        authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        try:
+            item = user_service.update_membership_plan(plan_id, body.model_dump(mode="python", exclude_unset=True))
+            return {"item": item, "items": user_service.list_membership_plans()}
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
+    @router.delete("/api/admin/membership-plans/{plan_id}")
+    async def delete_membership_plan(plan_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        try:
+            user_service.delete_membership_plan(plan_id)
+            return {"items": user_service.list_membership_plans()}
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
     @router.post("/api/admin/redeem-codes/generate")
     async def generate_redeem_codes(body: RedeemCodeGenerateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
@@ -250,6 +322,7 @@ def create_router(app_version: str) -> APIRouter:
                 value=body.value,
                 count=body.count,
                 expires_at=parse_optional_datetime(body.expires_at),
+                membership_plan_id=body.membership_plan_id,
             )
             return {"codes": codes, "items": user_service.list_redeem_codes()}
         except UserServiceError as exc:

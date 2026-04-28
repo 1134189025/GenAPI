@@ -20,6 +20,7 @@ type RedeemFeedback = {
 function typeLabel(type: string) {
   if (type === "image_quota") return "图片额度";
   if (type === "concurrency") return "图片并发";
+  if (type === "membership") return "会员兑换";
   return "邀请码";
 }
 
@@ -97,7 +98,7 @@ export default function RedeemPage() {
       setCode("");
       const history = await fetchRedeemHistory();
       setItems(history.items);
-      const rewardLabel = `${typeLabel(data.redeem.type)} +${data.redeem.value}`;
+      const rewardLabel = data.redeem.type === "membership" ? "会员套餐已激活" : `${typeLabel(data.redeem.type)} +${data.redeem.value}`;
       setFeedback({
         type: "success",
         title: "兑换成功",
@@ -132,7 +133,7 @@ export default function RedeemPage() {
             </div>
             <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换图片额度与并发能力</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。图片额度码和并发码可在这里使用，邀请码仍仅用于注册流程。
+              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。图片额度码、并发码和会员兑换码可在这里使用，邀请码仍仅用于注册流程。
             </p>
           </div>
           <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-4 lg:w-[360px]">
@@ -229,7 +230,7 @@ export default function RedeemPage() {
             <div className="grid gap-3 sm:grid-cols-3">
               <RedeemHint title="图片额度码" description="增加可用图片请求额度。" tone="teal" />
               <RedeemHint title="并发码" description="提升同时处理图片请求能力。" tone="amber" />
-              <RedeemHint title="邀请码" description="仅注册时使用，不在这里兑换。" tone="slate" />
+              <RedeemHint title="会员兑换码" description="激活会员套餐和周期额度。" tone="blue" />
             </div>
           </div>
         </section>
@@ -328,13 +329,14 @@ function FeedbackBanner({ feedback, action }: { feedback: RedeemFeedback; action
   );
 }
 
-function RedeemHint({ title, description, tone }: { title: string; description: string; tone: "teal" | "amber" | "slate" }) {
+function RedeemHint({ title, description, tone }: { title: string; description: string; tone: "teal" | "amber" | "blue" | "slate" }) {
   return (
     <div
       className={cn(
         "rounded-2xl border px-4 py-3",
         tone === "teal" && "border-teal-100 bg-teal-50 text-teal-800",
         tone === "amber" && "border-amber-100 bg-amber-50 text-amber-800",
+        tone === "blue" && "border-blue-100 bg-blue-50 text-blue-800",
         tone === "slate" && "border-slate-200 bg-slate-50 text-slate-700",
       )}
     >
@@ -346,7 +348,7 @@ function RedeemHint({ title, description, tone }: { title: string; description: 
 
 function RedeemHistoryItem({ item }: { item: RedeemCode }) {
   const typeTone =
-    item.type === "image_quota" ? "bg-teal-50 text-teal-700" : item.type === "concurrency" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
+    item.type === "image_quota" ? "bg-teal-50 text-teal-700" : item.type === "membership" ? "bg-blue-50 text-blue-700" : item.type === "concurrency" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
 
   return (
     <article className="flex flex-col gap-4 rounded-[24px] border border-slate-200/70 bg-white/90 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
