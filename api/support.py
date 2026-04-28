@@ -87,6 +87,22 @@ def start_limited_account_watcher(stop_event: Event) -> Thread:
     return thread
 
 
+def start_image_cache_watcher(stop_event: Event, interval_seconds: int = 3600) -> Thread:
+    def worker() -> None:
+        while not stop_event.is_set():
+            try:
+                removed = config.cleanup_old_images()
+                if removed:
+                    print(f"[image-cache-watcher] removed {removed} cached images")
+            except Exception as exc:
+                print(f"[image-cache-watcher] fail {exc}")
+            stop_event.wait(interval_seconds)
+
+    thread = Thread(target=worker, name="image-cache-watcher", daemon=True)
+    thread.start()
+    return thread
+
+
 def resolve_web_asset(requested_path: str) -> Path | None:
     if not WEB_DIST_DIR.exists():
         return None

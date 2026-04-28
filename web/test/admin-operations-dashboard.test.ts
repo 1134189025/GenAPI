@@ -21,6 +21,22 @@ describe("admin operations dashboard pages", () => {
     expect(authSettings).toContain("留空保留");
   });
 
+  test("image cache guardrails are exposed in the settings UI", () => {
+    const configCard = source("src/app/settings/components/config-card.tsx");
+    const settingsStore = source("src/app/settings/store.ts");
+    const api = source("src/lib/api.ts");
+
+    expect(configCard).toContain("图片保留时间");
+    expect(configCard).toContain("缓存大小上限");
+    expect(configCard).toContain("自动删除图片缓存");
+    expect(configCard).toContain("当前缓存");
+    expect(settingsStore).toContain("setImageCacheMaxSizeMb");
+    expect(settingsStore).toContain("setImageCacheAutoDeleteEnabled");
+    expect(api).toContain("ImageCacheStatus");
+    expect(api).toContain("image_cache_max_size_mb");
+    expect(api).toContain("image_cache_auto_delete_enabled");
+  });
+
   test("admin operation pages use shared dashboard primitives", () => {
     const pages = [
       "src/app/accounts/page.tsx",

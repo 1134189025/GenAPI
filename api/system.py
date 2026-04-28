@@ -29,12 +29,14 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/api/settings")
     async def get_settings(authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"config": config.get()}
+        return {"config": config.get(), "image_cache": config.get_image_cache_status()}
 
     @router.post("/api/settings")
     async def save_settings(body: SettingsUpdateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"config": config.update(body.model_dump(mode="python"))}
+        updated = config.update(body.model_dump(mode="python"))
+        config.cleanup_old_images()
+        return {"config": updated, "image_cache": config.get_image_cache_status()}
 
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):

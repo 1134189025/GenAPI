@@ -66,6 +66,7 @@ def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     file_path = config.images_dir / relative_dir / filename
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(image_data)
+    config.cleanup_old_images(protected_paths={file_path})
     return f"{(base_url or config.base_url)}/images/{relative_dir.as_posix()}/{filename}"
 
 

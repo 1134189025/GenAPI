@@ -55,10 +55,19 @@ export type SettingsConfig = {
   base_url?: string;
   refresh_account_interval_minute?: number | string;
   image_retention_days?: number | string;
+  image_cache_max_size_mb?: number | string;
+  image_cache_auto_delete_enabled?: boolean;
   auto_remove_invalid_accounts?: boolean;
   auto_remove_rate_limited_accounts?: boolean;
   log_levels?: string[];
   [key: string]: unknown;
+};
+
+export type ImageCacheStatus = {
+  total_size_bytes: number;
+  file_count: number;
+  max_size_bytes: number;
+  auto_delete_enabled: boolean;
 };
 
 export type ManagedImage = {
@@ -360,11 +369,11 @@ export async function editImage(
 }
 
 export async function fetchSettingsConfig() {
-  return httpRequest<{ config: SettingsConfig }>("/api/settings");
+  return httpRequest<{ config: SettingsConfig; image_cache?: ImageCacheStatus }>("/api/settings");
 }
 
 export async function updateSettingsConfig(settings: Partial<SettingsConfig>) {
-  return httpRequest<{ config: SettingsConfig }>("/api/settings", {
+  return httpRequest<{ config: SettingsConfig; image_cache?: ImageCacheStatus }>("/api/settings", {
     method: "POST",
     body: settings,
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, PlugZap, Save } from "lucide-react";
+import { HardDrive, LoaderCircle, PlugZap, Save } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,15 +13,28 @@ import { testProxy, type ProxyTestResult } from "@/lib/api";
 
 import { useSettingsStore } from "../store";
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 MB";
+  }
+  if (value >= 1024 * 1024 * 1024) {
+    return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  }
+  return `${Math.ceil(value / 1024 / 1024)} MB`;
+}
+
 export function ConfigCard() {
   const [isTestingProxy, setIsTestingProxy] = useState(false);
   const [proxyTestResult, setProxyTestResult] = useState<ProxyTestResult | null>(null);
   const logLevelOptions = ["debug", "info", "warning", "error"];
   const config = useSettingsStore((state) => state.config);
+  const imageCache = useSettingsStore((state) => state.imageCache);
   const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
   const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
+  const setImageCacheMaxSizeMb = useSettingsStore((state) => state.setImageCacheMaxSizeMb);
+  const setImageCacheAutoDeleteEnabled = useSettingsStore((state) => state.setImageCacheAutoDeleteEnabled);
   const setAutoRemoveInvalidAccounts = useSettingsStore((state) => state.setAutoRemoveInvalidAccounts);
   const setAutoRemoveRateLimitedAccounts = useSettingsStore((state) => state.setAutoRemoveRateLimitedAccounts);
   const setLogLevel = useSettingsStore((state) => state.setLogLevel);
@@ -67,7 +80,7 @@ export function ConfigCard() {
   }
 
   return (
-    <DataPanel title="基础运行配置" description="管理账号刷新、全局代理、图片访问地址、归档清理和日志级别。">
+    <DataPanel title="基础运行配置" description="管理账号刷新、全局代理、图片访问地址、缓存清理和日志级别。">
       <div className="space-y-4 p-6">
         <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-600">
           管理员登录密钥继续从部署配置读取，不再在此页面展示；如需分发给其他人，请在下方创建普通用户密钥。
@@ -132,7 +145,7 @@ export function ConfigCard() {
             <p className="text-xs text-stone-500">用于生成图片结果的访问前缀地址。</p>
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">图片自动清理</label>
+            <label className="text-sm text-stone-700">图片保留时间</label>
             <Input
               value={String(config?.image_retention_days || "")}
               onChange={(event) => setImageRetentionDays(event.target.value)}
@@ -140,6 +153,34 @@ export function ConfigCard() {
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
             <p className="text-xs text-stone-500">自动删除多少天前的本地图片。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">缓存大小上限</label>
+            <Input
+              value={String(config?.image_cache_max_size_mb || "")}
+              onChange={(event) => setImageCacheMaxSizeMb(event.target.value)}
+              placeholder="10240"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+            <p className="text-xs text-stone-500">单位 MB，超过后优先删除最旧图片。</p>
+          </div>
+          <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+            <Checkbox
+              checked={config?.image_cache_auto_delete_enabled !== false}
+              onCheckedChange={(checked) => setImageCacheAutoDeleteEnabled(Boolean(checked))}
+            />
+            自动删除图片缓存
+          </label>
+          <div className="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+            <div className="flex items-center gap-2 font-medium text-stone-900">
+              <HardDrive className="size-4 text-stone-500" />
+              当前缓存
+            </div>
+            <p className="mt-2 text-xs leading-6 text-stone-500">
+              {imageCache
+                ? `${formatBytes(imageCache.total_size_bytes)} / ${formatBytes(imageCache.max_size_bytes)}，${imageCache.file_count} 张图片`
+                : "等待后端返回缓存统计。"}
+            </p>
           </div>
           <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
             <Checkbox

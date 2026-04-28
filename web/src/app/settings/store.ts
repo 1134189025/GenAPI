@@ -19,6 +19,7 @@ import {
   updateSettingsConfig,
   type CPAPool,
   type CPARemoteFile,
+  type ImageCacheStatus,
   type RegisterConfig,
   type SettingsConfig,
 } from "@/lib/api";
@@ -32,6 +33,8 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     ...config,
     refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
     image_retention_days: Number(config.image_retention_days || 30),
+    image_cache_max_size_mb: Number(config.image_cache_max_size_mb || 10240),
+    image_cache_auto_delete_enabled: config.image_cache_auto_delete_enabled !== false,
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
     auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
     log_levels: Array.isArray(config.log_levels) ? config.log_levels : [],
@@ -76,6 +79,7 @@ export function mergeRegisterConfigForPoll(
 
 type SettingsStore = {
   config: SettingsConfig | null;
+  imageCache: ImageCacheStatus | null;
   isLoadingConfig: boolean;
   isSavingConfig: boolean;
 
@@ -111,6 +115,8 @@ type SettingsStore = {
   saveConfig: () => Promise<void>;
   setRefreshAccountIntervalMinute: (value: string) => void;
   setImageRetentionDays: (value: string) => void;
+  setImageCacheMaxSizeMb: (value: string) => void;
+  setImageCacheAutoDeleteEnabled: (value: boolean) => void;
   setAutoRemoveInvalidAccounts: (value: boolean) => void;
   setAutoRemoveRateLimitedAccounts: (value: boolean) => void;
   setLogLevel: (level: string, enabled: boolean) => void;
@@ -157,6 +163,7 @@ type SettingsStore = {
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   config: null,
+  imageCache: null,
   isLoadingConfig: true,
   isSavingConfig: false,
 
@@ -197,6 +204,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await fetchSettingsConfig();
       set({
         config: normalizeConfig(data.config),
+        imageCache: data.image_cache || null,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载系统配置失败");
@@ -217,6 +225,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         ...config,
         refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
         image_retention_days: Math.max(1, Number(config.image_retention_days) || 30),
+        image_cache_max_size_mb: Math.max(1, Number(config.image_cache_max_size_mb) || 10240),
+        image_cache_auto_delete_enabled: config.image_cache_auto_delete_enabled !== false,
         auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
         auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
         proxy: config.proxy.trim(),
@@ -224,6 +234,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       });
       set({
         config: normalizeConfig(data.config),
+        imageCache: data.image_cache || null,
       });
       toast.success("配置已保存");
     } catch (error) {
@@ -249,6 +260,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImageRetentionDays: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_retention_days: value } } : {});
+  },
+
+  setImageCacheMaxSizeMb: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_cache_max_size_mb: value } } : {});
+  },
+
+  setImageCacheAutoDeleteEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_cache_auto_delete_enabled: value } } : {});
   },
 
   setAutoRemoveInvalidAccounts: (value) => {

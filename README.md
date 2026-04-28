@@ -224,9 +224,12 @@ cp .env.example .env
 - `data/config.json`：后台系统设置。
 - `data/jwt_hmac_secret`：自动生成的 JWT HMAC 密钥。
 - `data/accounts.json` 或数据库账号池：上游账号数据。
+- `data/images/`：生成图片缓存，默认保留 30 天且全局上限 10GB，可在后台系统设置调整。
 - `data/logs.jsonl`：运行日志。
 
 这些文件包含敏感信息，不应提交到仓库。
+
+图片缓存会在服务启动、保存新图片后和后台定时任务中自动清理。后台系统设置支持调整图片保留天数、缓存大小上限和自动删除开关。
 
 ## 本地开发
 

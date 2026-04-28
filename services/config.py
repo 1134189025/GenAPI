@@ -5,9 +5,9 @@ import json
 import os
 import sys
 from pathlib import Path
-import time
 
 from services.storage.base import StorageBackend
+from services.image_cache_service import ImageCacheLimits, cleanup_image_cache, get_image_cache_status
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
@@ -101,6 +101,28 @@ class ConfigStore:
             return 30
 
     @property
+    def image_cache_max_size_mb(self) -> int:
+        try:
+            return max(1, int(float(self.data.get("image_cache_max_size_mb", 10240))))
+        except (TypeError, ValueError):
+            return 10240
+
+    @property
+    def image_cache_auto_delete_enabled(self) -> bool:
+        value = self.data.get("image_cache_auto_delete_enabled", True)
+        if isinstance(value, str):
+            return value.strip().lower() not in {"0", "false", "no", "off"}
+        return bool(value)
+
+    @property
+    def image_cache_limits(self) -> ImageCacheLimits:
+        return ImageCacheLimits(
+            retention_days=self.image_retention_days,
+            max_size_mb=self.image_cache_max_size_mb,
+            auto_delete_enabled=self.image_cache_auto_delete_enabled,
+        )
+
+    @property
     def auto_remove_invalid_accounts(self) -> bool:
         value = self.data.get("auto_remove_invalid_accounts", False)
         if isinstance(value, str):
@@ -128,19 +150,12 @@ class ConfigStore:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def cleanup_old_images(self) -> int:
-        cutoff = time.time() - self.image_retention_days * 86400
-        removed = 0
-        for path in self.images_dir.rglob("*"):
-            if path.is_file() and path.stat().st_mtime < cutoff:
-                path.unlink()
-                removed += 1
-        for path in sorted((p for p in self.images_dir.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
-            try:
-                path.rmdir()
-            except OSError:
-                pass
-        return removed
+    def cleanup_old_images(self, protected_paths: set[Path] | None = None) -> int:
+        result = cleanup_image_cache(self.images_dir, self.image_cache_limits, protected_paths=protected_paths)
+        return int(result.get("removed_files") or 0)
+
+    def get_image_cache_status(self) -> dict[str, object]:
+        return get_image_cache_status(self.images_dir, self.image_cache_limits)
 
     @property
     def base_url(self) -> str:
@@ -163,6 +178,8 @@ class ConfigStore:
         data = dict(self.data)
         data["refresh_account_interval_minute"] = self.refresh_account_interval_minute
         data["image_retention_days"] = self.image_retention_days
+        data["image_cache_max_size_mb"] = self.image_cache_max_size_mb
+        data["image_cache_auto_delete_enabled"] = self.image_cache_auto_delete_enabled
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["log_levels"] = self.log_levels

@@ -46,6 +46,28 @@ class ConfigLoadingTests(unittest.TestCase):
 
         self.assertNotIn("COPY config.json", dockerfile)
 
+    def test_image_cache_settings_have_safe_defaults_and_are_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = self.config_module.ConfigStore(Path(tmp_dir) / "config.json")
+
+            self.assertEqual(store.image_retention_days, 30)
+            self.assertEqual(store.image_cache_max_size_mb, 10240)
+            self.assertTrue(store.image_cache_auto_delete_enabled)
+            self.assertEqual(store.get()["image_cache_max_size_mb"], 10240)
+            self.assertEqual(store.get()["image_cache_auto_delete_enabled"], True)
+
+            updated = store.update(
+                {
+                    "image_retention_days": "0",
+                    "image_cache_max_size_mb": "0",
+                    "image_cache_auto_delete_enabled": "false",
+                }
+            )
+
+            self.assertEqual(updated["image_retention_days"], 1)
+            self.assertEqual(updated["image_cache_max_size_mb"], 1)
+            self.assertEqual(updated["image_cache_auto_delete_enabled"], False)
+
 
 if __name__ == "__main__":
     unittest.main()
