@@ -35,6 +35,17 @@ class ConfigLoadingTests(unittest.TestCase):
                 module.DATA_DIR = old_data_dir
                 module.CONFIG_FILE = old_config_file
 
+    def test_default_config_file_lives_in_data_directory(self) -> None:
+        module = self.config_module
+
+        self.assertEqual(module.CONFIG_FILE, module.DATA_DIR / "config.json")
+
+    def test_dockerfile_does_not_require_ignored_root_config_json(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        dockerfile = (root_dir / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertNotIn("COPY config.json", dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

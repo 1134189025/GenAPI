@@ -211,6 +211,7 @@ cp .env.example .env
 常用环境变量：
 
 - `JWT_SECRET`：JWT 签名密钥，生产环境建议手动设置。
+- `GENAPI_CONFIG_FILE`：运行时配置文件，默认 `data/config.json`。
 - `GENAPI_USER_DATABASE_URL`：用户系统数据库，默认 `data/users.db`。
 - `GENAPI_BASE_URL`：对外访问地址，用于生成图片 URL。
 - `STORAGE_BACKEND`：账号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
@@ -220,6 +221,7 @@ cp .env.example .env
 运行时数据：
 
 - `data/users.db`：用户、额度、兑换码、优惠码、验证码等数据。
+- `data/config.json`：后台系统设置。
 - `data/jwt_hmac_secret`：自动生成的 JWT HMAC 密钥。
 - `data/accounts.json` 或数据库账号池：上游账号数据。
 - `data/logs.jsonl`：运行日志。

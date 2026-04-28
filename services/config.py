@@ -11,13 +11,20 @@ from services.storage.base import StorageBackend
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
-CONFIG_FILE = BASE_DIR / "config.json"
 VERSION_FILE = BASE_DIR / "VERSION"
 
 
 @dataclass(frozen=True)
 class LoadedSettings:
     refresh_account_interval_minute: int
+
+
+def _configured_config_file() -> Path:
+    configured = str(os.getenv("GENAPI_CONFIG_FILE") or os.getenv("CHATGPT2API_CONFIG_FILE") or "").strip()
+    return Path(configured).expanduser() if configured else DATA_DIR / "config.json"
+
+
+CONFIG_FILE = _configured_config_file()
 
 
 def _read_json_object(path: Path, *, name: str) -> dict[str, object]:
@@ -36,9 +43,20 @@ def _read_json_object(path: Path, *, name: str) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _legacy_config_file() -> Path:
+    return BASE_DIR / "config.json"
+
+
+def _read_effective_config(path: Path) -> dict[str, object]:
+    data = _read_json_object(path, name="config.json")
+    if data or path == _legacy_config_file():
+        return data
+    return _read_json_object(_legacy_config_file(), name="legacy config.json")
+
+
 def _load_settings() -> LoadedSettings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    raw_config = _read_json_object(CONFIG_FILE, name="config.json")
+    raw_config = _read_effective_config(CONFIG_FILE)
 
     try:
         refresh_interval = int(raw_config.get("refresh_account_interval_minute", 5))
@@ -58,9 +76,10 @@ class ConfigStore:
         self._storage_backend: StorageBackend | None = None
 
     def _load(self) -> dict[str, object]:
-        return _read_json_object(self.path, name="config.json")
+        return _read_effective_config(self.path)
 
     def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     @property
