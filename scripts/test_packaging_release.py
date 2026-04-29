@@ -44,6 +44,7 @@ def test_release_workflow() -> None:
         "uv run pyinstaller",
         "pyinstaller",
         "--onefile",
+        "--paths \".\"",
         "--add-data \"VERSION:.\"",
         "--add-data \"web_dist:web_dist\"",
         "genapi_${VERSION}_linux_${ARCH}.tar.gz",

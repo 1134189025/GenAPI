@@ -135,6 +135,7 @@ jobs:
             --clean \
             --onefile \
             --name genapi \
+            --paths "." \
             --add-data "VERSION:." \
             --add-data "web_dist:web_dist" \
             --collect-all curl_cffi \
