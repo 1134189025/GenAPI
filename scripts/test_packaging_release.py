@@ -49,7 +49,11 @@ def test_release_workflow() -> None:
         "--add-data \"web_dist:web_dist\"",
         "genapi_${VERSION}_linux_${ARCH}.tar.gz",
         "checksums.txt",
+        "REPO: ${{ github.repository }}",
+        "gh release view \"${TAG}\" --repo \"${REPO}\"",
+        "gh release create \"${TAG}\" --repo \"${REPO}\"",
         "gh release upload",
+        "gh release upload \"${TAG}\" --repo \"${REPO}\"",
         "ubuntu-24.04-arm",
     ]:
         assert_contains(text, expected, path)

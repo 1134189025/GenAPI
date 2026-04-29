@@ -183,10 +183,11 @@ jobs:
       - name: Upload assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          if ! gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release create "${TAG}" --title "Genapi ${VERSION}" --notes "Genapi ${VERSION}"
+          if ! gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+            gh release create "${TAG}" --repo "${REPO}" --title "Genapi ${VERSION}" --notes "Genapi ${VERSION}"
           fi
-          gh release upload "${TAG}" release/genapi_*.tar.gz release/checksums.txt --clobber
+          gh release upload "${TAG}" --repo "${REPO}" release/genapi_*.tar.gz release/checksums.txt --clobber
