@@ -271,15 +271,40 @@ export type UpdatePreflight = {
   [key: string]: unknown;
 };
 
+export type UpdateReleaseAsset = {
+  name: string;
+  download_url?: string;
+  browser_download_url?: string;
+  size?: number;
+  [key: string]: unknown;
+};
+
+export type UpdateReleaseInfo = {
+  name?: string;
+  tag_name?: string;
+  body?: string;
+  published_at?: string;
+  html_url?: string;
+  assets?: UpdateReleaseAsset[];
+  [key: string]: unknown;
+};
+
 export type UpdateStatus = {
-  enabled: boolean;
-  mode: "manual" | "docker-compose" | string;
-  update_available: boolean;
+  enabled?: boolean;
+  mode?: "manual" | "docker-compose" | string;
+  deployment_mode?: "systemd" | "docker" | "docker-compose" | "source" | "manual" | string;
+  build_type?: "release" | "source" | string;
+  can_update?: boolean;
+  has_update?: boolean;
+  update_available?: boolean;
   current_version: string;
   latest_version?: string;
   latest_tag?: string;
+  release_info?: UpdateReleaseInfo;
   release_url?: string;
   checked_at?: string;
+  cached?: boolean;
+  warning?: string;
   disabled_reason?: string;
   error?: string;
   repo?: string;
@@ -309,6 +334,17 @@ export type UpdateStatusResponse = {
   status: UpdateStatus;
   preflight: UpdatePreflight;
   jobs: UpdateJob[];
+};
+
+export type SystemUpdateResult = {
+  message: string;
+  need_restart?: boolean;
+  [key: string]: unknown;
+};
+
+export type SystemVersionResponse = {
+  version: string;
+  [key: string]: unknown;
 };
 
 export async function fetchSetupStatus() {
@@ -493,6 +529,27 @@ export async function fetchSettingsConfig() {
 export async function fetchUpdateStatus(force = false) {
   const path = "/api/admin/update/status";
   return httpRequest<UpdateStatusResponse>(force ? `${path}?force=true` : path);
+}
+
+export async function getSystemVersion() {
+  return httpRequest<SystemVersionResponse>("/api/admin/system/version");
+}
+
+export async function checkSystemUpdates(force = false) {
+  const path = "/api/admin/system/check-updates";
+  return httpRequest<UpdateStatus>(force ? `${path}?force=true` : path);
+}
+
+export async function performSystemUpdate() {
+  return httpRequest<SystemUpdateResult>("/api/admin/system/update", { method: "POST" });
+}
+
+export async function rollbackSystemUpdate() {
+  return httpRequest<SystemUpdateResult>("/api/admin/system/rollback", { method: "POST" });
+}
+
+export async function restartSystemService() {
+  return httpRequest<{ message: string }>("/api/admin/system/restart", { method: "POST" });
 }
 
 export async function startSystemUpdate() {

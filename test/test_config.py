@@ -1,5 +1,10 @@
 import tempfile
 import unittest
+import importlib
+import io
+import os
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -9,6 +14,9 @@ class ConfigLoadingTests(unittest.TestCase):
         from services import config as config_module
 
         cls.config_module = config_module
+
+    def setUp(self) -> None:
+        self.config_module = sys.modules.get("services.config") or importlib.import_module("services.config")
 
     def test_load_settings_ignores_directory_config_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -39,6 +47,96 @@ class ConfigLoadingTests(unittest.TestCase):
         module = self.config_module
 
         self.assertEqual(module.CONFIG_FILE, module.DATA_DIR / "config.json")
+
+    def test_genapi_data_dir_overrides_default_data_directory(self) -> None:
+        module = self.config_module
+        old_data_dir = os.environ.get("GENAPI_DATA_DIR")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.environ["GENAPI_DATA_DIR"] = str(Path(tmp_dir) / "runtime-data")
+
+                reloaded = importlib.reload(module)
+
+                self.assertEqual(reloaded.DATA_DIR, Path(tmp_dir) / "runtime-data")
+                self.assertEqual(reloaded.CONFIG_FILE, reloaded.DATA_DIR / "config.json")
+            finally:
+                if old_data_dir is None:
+                    os.environ.pop("GENAPI_DATA_DIR", None)
+                else:
+                    os.environ["GENAPI_DATA_DIR"] = old_data_dir
+                self.config_module = importlib.reload(module)
+
+    def test_pyinstaller_resource_path_is_used_for_version_file(self) -> None:
+        module = self.config_module
+        old_frozen = getattr(sys, "frozen", None)
+        old_meipass = getattr(sys, "_MEIPASS", None)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            resource_dir = Path(tmp_dir)
+            (resource_dir / "VERSION").write_text("0.1.6\n", encoding="utf-8")
+            try:
+                sys.frozen = True
+                sys._MEIPASS = str(resource_dir)
+
+                reloaded = importlib.reload(module)
+                store = reloaded.ConfigStore(resource_dir / "config.json")
+
+                self.assertEqual(reloaded.VERSION_FILE, resource_dir / "VERSION")
+                self.assertEqual(store.app_version, "0.1.6")
+            finally:
+                if old_frozen is None:
+                    try:
+                        delattr(sys, "frozen")
+                    except AttributeError:
+                        pass
+                else:
+                    sys.frozen = old_frozen
+                if old_meipass is None:
+                    try:
+                        delattr(sys, "_MEIPASS")
+                    except AttributeError:
+                        pass
+                else:
+                    sys._MEIPASS = old_meipass
+                self.config_module = importlib.reload(module)
+
+    def test_main_cli_uses_version_flag_and_host_port_env(self) -> None:
+        old_host = os.environ.get("GENAPI_HOST")
+        old_port = os.environ.get("GENAPI_PORT")
+        try:
+            os.environ["GENAPI_HOST"] = "0.0.0.0"
+            os.environ["GENAPI_PORT"] = "9016"
+            sys.modules.pop("main", None)
+            main_module = importlib.import_module("main")
+
+            calls: list[dict[str, object]] = []
+            original_run = main_module.uvicorn.run
+            main_module.uvicorn.run = lambda app, **kwargs: calls.append(kwargs)
+            try:
+                self.assertEqual(main_module.main([]), 0)
+                self.assertEqual(calls[-1]["host"], "0.0.0.0")
+                self.assertEqual(calls[-1]["port"], 9016)
+
+                self.assertEqual(main_module.main(["--host", "127.0.0.1", "--port", "8016"]), 0)
+                self.assertEqual(calls[-1]["host"], "127.0.0.1")
+                self.assertEqual(calls[-1]["port"], 8016)
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(main_module.main(["--version"]), 0)
+                self.assertEqual(output.getvalue().strip(), str(main_module.app.version))
+                self.assertEqual(len(calls), 2)
+            finally:
+                main_module.uvicorn.run = original_run
+                sys.modules.pop("main", None)
+        finally:
+            if old_host is None:
+                os.environ.pop("GENAPI_HOST", None)
+            else:
+                os.environ["GENAPI_HOST"] = old_host
+            if old_port is None:
+                os.environ.pop("GENAPI_PORT", None)
+            else:
+                os.environ["GENAPI_PORT"] = old_port
 
     def test_dockerfile_does_not_require_ignored_root_config_json(self) -> None:
         root_dir = Path(__file__).resolve().parents[1]

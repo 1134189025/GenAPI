@@ -61,6 +61,33 @@ class StaticSpaRouteTests(unittest.TestCase):
                 response = self.client.head(path)
                 self.assertEqual(response.status_code, 200, response.text)
 
+    def test_web_dist_resolves_from_pyinstaller_resource_dir(self) -> None:
+        support_module = sys.modules["api.support"]
+        old_frozen = getattr(sys, "frozen", None)
+        old_meipass = getattr(sys, "_MEIPASS", None)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            resource_dir = Path(tmp_dir)
+            try:
+                sys.frozen = True
+                sys._MEIPASS = str(resource_dir)
+
+                self.assertEqual(support_module._resolve_web_dist_dir(), resource_dir / "web_dist")
+            finally:
+                if old_frozen is None:
+                    try:
+                        delattr(sys, "frozen")
+                    except AttributeError:
+                        pass
+                else:
+                    sys.frozen = old_frozen
+                if old_meipass is None:
+                    try:
+                        delattr(sys, "_MEIPASS")
+                    except AttributeError:
+                        pass
+                else:
+                    sys._MEIPASS = old_meipass
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,8 +11,23 @@ from services.storage.base import atomic_write_text
 from services.image_cache_service import ImageCacheLimits, cleanup_image_cache, get_image_cache_status
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = BASE_DIR / "data"
-VERSION_FILE = BASE_DIR / "VERSION"
+
+
+def _resource_dir() -> Path:
+    meipass = getattr(sys, "_MEIPASS", "")
+    if bool(getattr(sys, "frozen", False)) and meipass:
+        return Path(str(meipass)).expanduser()
+    return BASE_DIR
+
+
+def _configured_data_dir() -> Path:
+    configured = str(os.getenv("GENAPI_DATA_DIR") or "").strip()
+    return Path(configured).expanduser() if configured else BASE_DIR / "data"
+
+
+RESOURCE_DIR = _resource_dir()
+DATA_DIR = _configured_data_dir()
+VERSION_FILE = RESOURCE_DIR / "VERSION"
 
 
 @dataclass(frozen=True)

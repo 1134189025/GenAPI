@@ -1,426 +1,572 @@
 from __future__ import annotations
 
-from ipaddress import ip_address
-from pathlib import Path
+from dataclasses import dataclass
+import hashlib
+import hmac
+import io
+import json
+import os
+import platform
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import sys
+import tarfile
+import tempfile
+import time
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
+import urllib.request
 
 
-DockerClientFactory = Callable[[], Any]
+UrlOpener = Callable[..., Any]
+ExitFunc = Callable[[int], Any]
+ALLOWED_DOWNLOAD_HOSTS = ("github.com", "objects.githubusercontent.com")
+BINARY_NAMES = {"genapi", "genapi.exe"}
+CHECKSUM_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
-class DockerUpdateExecutor:
+@dataclass(frozen=True)
+class ReleaseLayout:
+    app_dir: Path
+    releases_dir: Path
+    current_link: Path
+    previous_link: Path
+    running_release_dir: Path
+
+
+class BinaryUpdateExecutor:
     def __init__(
         self,
         data_dir: Path | str,
         settings: Any,
-        docker_client_factory: DockerClientFactory | None = None,
+        opener: UrlOpener = urllib.request.urlopen,
+        executable_path: Path | str | None = None,
+        exit_func: ExitFunc | None = None,
+        restart_delay_seconds: float = 0.5,
+        systemctl_runner: Any | None = None,
+        docker_client_factory: Any | None = None,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.settings = settings
+        self._opener = opener
+        self._executable_path = Path(executable_path) if executable_path is not None else None
+        self._exit_func = exit_func or os._exit
+        self._restart_delay_seconds = max(0.0, float(restart_delay_seconds or 0.0))
         self._docker_client_factory = docker_client_factory
 
-    def preflight(self) -> dict[str, object]:
+    def preflight(self, release_info: dict[str, Any] | None = None, allow_pending_current: bool = False) -> dict[str, object]:
         errors: list[str] = []
         warnings: list[str] = []
 
-        if not bool(getattr(self.settings, "enabled", False)):
-            errors.append("Web updater is disabled. Set GENAPI_ENABLE_WEB_UPDATER=true to enable Docker updates.")
-            return {"ok": False, "errors": errors, "warnings": warnings}
+        deployment_mode = str(getattr(self.settings, "deployment_mode", "") or "")
+        if deployment_mode != "systemd-binary":
+            errors.append("GENAPI_DEPLOYMENT_MODE must be systemd-binary for binary updates.")
 
-        compose_dir = str(getattr(self.settings, "compose_dir", "") or "")
-        if not compose_dir:
-            errors.append("GENAPI_UPDATE_COMPOSE_DIR must be set to the host directory containing docker-compose.yml.")
-        elif not Path(compose_dir).is_absolute():
-            errors.append("GENAPI_UPDATE_COMPOSE_DIR must be an absolute host path.")
-        else:
-            compose_path = Path(compose_dir)
-            if not compose_path.exists():
-                warnings.append(
-                    "GENAPI_UPDATE_COMPOSE_DIR is not visible inside this container; "
-                    "the Docker daemon will validate the host path when the helper starts."
-                )
-            elif not compose_path.is_dir():
-                errors.append("GENAPI_UPDATE_COMPOSE_DIR must point to a host directory.")
-            elif not (compose_path / "docker-compose.yml").is_file():
-                errors.append("GENAPI_UPDATE_COMPOSE_DIR must contain docker-compose.yml.")
+        build_type = str(getattr(self.settings, "build_type", "") or "")
+        if build_type != "release":
+            errors.append("GENAPI_BUILD_TYPE must be release for binary updates.")
 
-        service = str(getattr(self.settings, "service", "") or "").strip()
-        if not service:
-            errors.append("GENAPI_UPDATE_SERVICE must be set to the Compose service that should be updated.")
-
-        helper_image = str(getattr(self.settings, "helper_image", "") or "").strip()
-        if not helper_image:
-            errors.append("GENAPI_UPDATE_HELPER_IMAGE must be set to a Docker image containing docker compose.")
-
-        try:
-            timeout_seconds = int(getattr(self.settings, "timeout_seconds", 0) or 0)
-        except (TypeError, ValueError):
-            timeout_seconds = 0
-        if timeout_seconds <= 0:
-            errors.append("GENAPI_UPDATE_TIMEOUT_SECONDS must be a positive integer.")
-
-        health_url = str(getattr(self.settings, "health_url", "") or "").strip()
-        if not health_url:
-            errors.append("GENAPI_UPDATE_HEALTH_URL must be set so the updater can verify the app and roll back on failure.")
+        executable = self._resolve_executable()
+        if not executable:
+            errors.append("Current executable could not be resolved.")
+        elif not executable.exists():
+            errors.append(f"Current executable does not exist: {executable}")
+        elif not executable.is_file():
+            errors.append(f"Current executable is not a regular file: {executable}")
         else:
             try:
-                parsed_health_url = urlparse(health_url)
-            except ValueError:
-                parsed_health_url = None
-            if parsed_health_url is not None:
-                try:
-                    health_hostname = parsed_health_url.hostname
-                    parsed_health_url.port
-                except ValueError:
-                    health_hostname = None
-            if (
-                parsed_health_url is None
-                or parsed_health_url.scheme not in {"http", "https"}
-                or not parsed_health_url.netloc
-                or not health_hostname
-            ):
-                errors.append("GENAPI_UPDATE_HEALTH_URL must be an http or https URL.")
-            elif self._is_loopback_hostname(health_hostname):
-                errors.append(
-                    "GENAPI_UPDATE_HEALTH_URL must not use a localhost or loopback host because the "
-                    "bridge helper container cannot reach the app through its own loopback; use "
-                    "http://host.docker.internal:PORT/version."
-                )
+                layout = self._release_layout(executable, allow_pending_current=allow_pending_current)
+            except ValueError as exc:
+                errors.append(str(exc))
+            else:
+                if not os.access(layout.app_dir, os.W_OK):
+                    errors.append(f"Release app directory is not writable: {layout.app_dir}")
+                if not os.access(layout.releases_dir, os.W_OK):
+                    errors.append(f"Release versions directory is not writable: {layout.releases_dir}")
 
-        if self._docker_client_factory is None:
-            if not Path("/var/run/docker.sock").exists():
-                errors.append("Docker socket /var/run/docker.sock is not available to this process.")
-            try:
-                import docker  # noqa: F401
-            except ImportError:
-                errors.append("Docker SDK is not installed. Install it with: uv add docker or pip install docker.")
+        if platform.system().lower() != "linux":
+            warnings.append("Binary updates are designed for Linux systemd deployments.")
+
+        if release_info is not None and self._compatible_asset(release_info) is None:
+            errors.append("No compatible linux_amd64/linux_arm64 release asset was found for this runtime.")
+        if release_info is not None and self._checksum_asset(release_info) is None:
+            errors.append("Release checksums.txt asset is required for binary updates.")
 
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
-    def start(self, job_id: str, target_tag: str, target_version: str, release_url: str) -> Any:
-        client = self._get_docker_client()
-        compose_dir = str(getattr(self.settings, "compose_dir", "") or "")
-        command = self._build_helper_command()
+    def perform_update(self, target_tag: str, target_version: str, release_info: dict[str, Any]) -> dict[str, Any]:
+        preflight = self.preflight(release_info=release_info)
+        if not preflight.get("ok"):
+            raise RuntimeError("update preflight failed: " + "; ".join(str(error) for error in preflight["errors"]))
 
-        return client.containers.run(
-            image=str(getattr(self.settings, "helper_image", "docker:28-cli")),
-            name=f"genapi-update-{job_id}",
-            command=command,
-            detach=True,
-            working_dir=compose_dir,
-            network_mode="bridge",
-            extra_hosts={"host.docker.internal": "host-gateway"},
-            volumes={
-                "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
-                compose_dir: {"bind": compose_dir, "mode": "rw"},
+        asset = self._compatible_asset(release_info)
+        if asset is None:
+            raise ValueError("No compatible release asset found.")
+
+        asset_name = str(asset.get("name") or "")
+        asset_url = str(asset.get("download_url") or "")
+        asset_size = self._asset_size(asset)
+        max_bytes = self._max_download_bytes()
+        if asset_size > max_bytes:
+            raise ValueError(f"Release asset {asset_name} exceeds max download size of {max_bytes} bytes.")
+
+        checksum_asset = self._checksum_asset(release_info)
+        if checksum_asset is None:
+            raise ValueError("Release checksums.txt asset is required for binary updates.")
+
+        archive_bytes = self._download_url(asset_url, max_bytes=max_bytes, expected_size=asset_size)
+        checksum_bytes = self._download_url(
+            str(checksum_asset.get("download_url") or ""),
+            max_bytes=max_bytes,
+            expected_size=self._asset_size(checksum_asset),
+        )
+        self._verify_checksum(asset_name, archive_bytes, checksum_bytes)
+
+        executable = self._require_executable()
+        layout = self._require_release_layout(executable)
+        with tempfile.TemporaryDirectory(prefix=f".{executable.name}-update-", dir=layout.releases_dir) as temp_dir:
+            staged_payload = Path(temp_dir) / "payload"
+            self._extract_release_payload(archive_bytes, staged_payload)
+            backup_path = self._activate_release_payload(layout, staged_payload, target_version)
+
+        return {
+            "ok": True,
+            "target_tag": target_tag,
+            "target_version": target_version,
+            "asset": {
+                "name": asset_name,
+                "download_url": asset_url,
+                "size": asset_size,
             },
-            environment=[
-                f"GENAPI_UPDATE_JOB_ID={job_id}",
-                f"GENAPI_UPDATE_SERVICE={getattr(self.settings, 'service', 'app')}",
-                f"GENAPI_UPDATE_COMPOSE_DIR={compose_dir}",
-                f"GENAPI_UPDATE_TARGET_TAG={target_tag}",
-                f"GENAPI_UPDATE_TARGET_VERSION={target_version}",
-                f"GENAPI_UPDATE_TARGET_IMAGE={getattr(self.settings, 'target_image', '') or ''}",
-                f"GENAPI_UPDATE_RELEASE_URL={release_url}",
-                f"GENAPI_UPDATE_TIMEOUT_SECONDS={getattr(self.settings, 'timeout_seconds', 600)}",
-                f"GENAPI_UPDATE_HEALTH_URL={getattr(self.settings, 'health_url', '') or ''}",
-            ],
-            labels={
-                "genapi.update.executor": "docker-helper",
-                "genapi.update.job_id": job_id,
-                "genapi.update.job": f"genapi.update.job_id={job_id}",
-            },
+            "backup_path": str(backup_path),
+        }
+
+    def rollback(self) -> dict[str, Any]:
+        executable = self._require_executable()
+        layout = self._require_release_layout(executable, allow_pending_current=True)
+        if not layout.previous_link.is_symlink():
+            raise FileNotFoundError(f"Previous release symlink does not exist: {layout.previous_link}")
+        previous_target = layout.previous_link.resolve()
+        _validate_release_payload_tree(previous_target)
+
+        current_target = layout.current_link.resolve()
+        current_tmp = layout.app_dir / f".current-rollback-{os.getpid()}"
+        previous_tmp = layout.app_dir / f".previous-rollback-{os.getpid()}"
+        self._remove_path(current_tmp)
+        self._remove_path(previous_tmp)
+        current_tmp.symlink_to(previous_target)
+        os.replace(current_tmp, layout.current_link)
+        try:
+            previous_tmp.symlink_to(current_target)
+            os.replace(previous_tmp, layout.previous_link)
+        finally:
+            self._remove_path(current_tmp)
+            self._remove_path(previous_tmp)
+        return {"ok": True, "executable": str(executable), "restored_from": str(previous_target)}
+
+    def restart(self) -> dict[str, Any]:
+        if self._restart_delay_seconds:
+            time.sleep(self._restart_delay_seconds)
+        self._exit_func(0)
+        return {"ok": True, "message": "process exit requested for systemd restart"}
+
+    def start(self, job_id: str, target_tag: str, target_version: str, release_url: str) -> dict[str, Any]:
+        job_dir = self.data_dir / "update-jobs" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        self._write_job_status(
+            job_dir,
+            status="running",
+            message="Starting binary update",
+            target_tag=target_tag,
+            target_version=target_version,
+            release_url=release_url,
+        )
+        try:
+            release_info = self._fetch_release_info(target_tag)
+            result = self.perform_update(target_tag, target_version, release_info)
+            self._write_job_status(
+                job_dir,
+                status="succeeded",
+                message="Update completed successfully; restart is required",
+                target_tag=target_tag,
+                target_version=target_version,
+                release_url=release_url,
+                finished=True,
+            )
+            return result
+        except Exception as exc:
+            self._write_job_status(
+                job_dir,
+                status="failed",
+                message=str(exc),
+                target_tag=target_tag,
+                target_version=target_version,
+                release_url=release_url,
+                finished=True,
+            )
+            raise
+
+    def _resolve_executable(self) -> Path | None:
+        if self._executable_path is not None:
+            candidate = self._executable_path
+        else:
+            proc_exe = Path("/proc/self/exe")
+            candidate = proc_exe if proc_exe.exists() else Path(sys.executable)
+        try:
+            return candidate.expanduser().resolve()
+        except (OSError, RuntimeError):
+            return None
+
+    def _require_executable(self) -> Path:
+        executable = self._resolve_executable()
+        if executable is None:
+            raise RuntimeError("Current executable could not be resolved.")
+        return executable
+
+    def _require_release_layout(self, executable: Path, *, allow_pending_current: bool = False) -> ReleaseLayout:
+        try:
+            return self._release_layout(executable, allow_pending_current=allow_pending_current)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    @staticmethod
+    def _release_layout(executable: Path, *, allow_pending_current: bool = False) -> ReleaseLayout:
+        running_release_dir = executable.parent
+        releases_dir = running_release_dir.parent
+        app_dir = releases_dir.parent
+        current_link = app_dir / "current"
+        previous_link = app_dir / "previous"
+
+        if releases_dir.name != "releases":
+            raise ValueError("Current executable must run from the release layout under releases/<version>/genapi.")
+        if not current_link.is_symlink():
+            raise ValueError(f"Release current symlink is required: {current_link}")
+        current_target = current_link.resolve()
+        if current_target != running_release_dir:
+            previous_matches = previous_link.is_symlink() and previous_link.resolve() == running_release_dir
+            if not (allow_pending_current and previous_matches):
+                raise ValueError("Release current symlink does not point at the running executable; restart is required before another update.")
+        if not releases_dir.is_dir():
+            raise ValueError(f"Release versions directory does not exist: {releases_dir}")
+        return ReleaseLayout(
+            app_dir=app_dir,
+            releases_dir=releases_dir,
+            current_link=current_link,
+            previous_link=previous_link,
+            running_release_dir=running_release_dir,
         )
 
-    def _get_docker_client(self) -> Any:
-        if self._docker_client_factory is not None:
-            return self._docker_client_factory()
+    def _compatible_asset(self, release_info: dict[str, Any]) -> dict[str, Any] | None:
+        marker = self._runtime_asset_marker()
+        if marker is None:
+            return None
+        assets = release_info.get("assets")
+        if not isinstance(assets, list):
+            return None
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            name = str(asset.get("name") or "").lower()
+            if not name or name.endswith("checksums.txt"):
+                continue
+            if marker in name:
+                return asset
+        return None
 
-        try:
-            import docker
-        except ImportError as exc:
-            raise RuntimeError("Docker SDK is not installed. Install it with: uv add docker or pip install docker.") from exc
+    def _checksum_asset(self, release_info: dict[str, Any]) -> dict[str, Any] | None:
+        assets = release_info.get("assets")
+        if not isinstance(assets, list):
+            return None
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            if str(asset.get("name") or "").lower().endswith("checksums.txt"):
+                return asset
+        return None
 
-        return docker.from_env()
+    def _download_url(self, url: str, *, max_bytes: int, expected_size: int = 0) -> bytes:
+        self._validate_download_url(url)
+        if expected_size > max_bytes:
+            raise ValueError(f"Download exceeds max download size of {max_bytes} bytes.")
+
+        request = urllib.request.Request(url, headers=self._download_headers())
+        chunks: list[bytes] = []
+        total = 0
+        with self._opener(request, timeout=self._timeout_seconds()) as response:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError(f"Download exceeds max download size of {max_bytes} bytes.")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
     @staticmethod
-    def _is_loopback_hostname(hostname: str) -> bool:
-        normalized = str(hostname or "").strip().rstrip(".").lower()
-        if normalized == "localhost":
-            return True
+    def _validate_download_url(url: str) -> None:
         try:
-            return ip_address(normalized).is_loopback
-        except ValueError:
-            return False
+            parsed = urlparse(url)
+        except ValueError as exc:
+            raise ValueError("Download URL is invalid.") from exc
+        if parsed.scheme != "https":
+            raise ValueError("Download URL must use HTTPS.")
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+        if not hostname:
+            raise ValueError("Download URL must include a hostname.")
+        if not any(hostname == allowed or hostname.endswith(f".{allowed}") for allowed in ALLOWED_DOWNLOAD_HOSTS):
+            raise ValueError(f"Download host is not allowed: {hostname}")
 
     @staticmethod
-    def _build_helper_command() -> list[str]:
-        script = r"""#!/bin/sh
-set -eu
+    def _verify_checksum(asset_name: str, payload: bytes, checksum_payload: bytes) -> None:
+        expected = _checksum_for_asset(asset_name, checksum_payload.decode("utf-8", errors="replace"))
+        if expected is None:
+            raise ValueError(f"checksums.txt does not contain a checksum for {asset_name}.")
+        actual = hashlib.sha256(payload).hexdigest()
+        if not hmac.compare_digest(actual.lower(), expected.lower()):
+            raise ValueError(f"Release asset checksum mismatch for {asset_name}.")
 
-JOB_ID="${GENAPI_UPDATE_JOB_ID:?missing job id}"
-SERVICE="${GENAPI_UPDATE_SERVICE:?missing service}"
-TARGET_TAG="${GENAPI_UPDATE_TARGET_TAG:?missing target tag}"
-TARGET_VERSION="${GENAPI_UPDATE_TARGET_VERSION:?missing target version}"
-TARGET_IMAGE="${GENAPI_UPDATE_TARGET_IMAGE:-}"
-RELEASE_URL="${GENAPI_UPDATE_RELEASE_URL:-}"
-TIMEOUT_SECONDS="${GENAPI_UPDATE_TIMEOUT_SECONDS:-600}"
-HEALTH_URL="${GENAPI_UPDATE_HEALTH_URL:-}"
-COMPOSE_DIR="${GENAPI_UPDATE_COMPOSE_DIR:?missing compose dir}"
+    @staticmethod
+    def _extract_release_payload(archive_bytes: bytes, destination: Path) -> None:
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
+                members = archive.getmembers()
+                for member in members:
+                    _validate_tar_path(member.name)
+                    if not (member.isfile() or member.isdir()):
+                        raise ValueError(f"Archive member {member.name} is not a regular file or directory.")
 
-JOB_DIR="${COMPOSE_DIR}/data/update-jobs/${JOB_ID}"
-LOG_FILE="${JOB_DIR}/log.txt"
-STATUS_FILE="${JOB_DIR}/status.json"
-BACKUP_DIR="${COMPOSE_DIR}/.genapi-update-backups"
+                payload_root = _find_release_payload_root(members)
+                destination.mkdir(parents=True, exist_ok=True)
+                for member in members:
+                    member_path = PurePosixPath(member.name)
+                    relative_path = _relative_to_payload_root(member_path, payload_root)
+                    if relative_path is None or str(relative_path) in {"", "."}:
+                        continue
+                    target = destination.joinpath(*relative_path.parts)
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    source = archive.extractfile(member)
+                    if source is None:
+                        raise ValueError(f"Archive member {member.name} could not be read.")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with source, target.open("wb") as handle:
+                        handle.write(source.read())
+                    target.chmod(member.mode & 0o777 or 0o644)
+        except tarfile.TarError as exc:
+            raise ValueError("Release asset is not a readable tar archive.") from exc
 
-mkdir -p "${JOB_DIR}" "${BACKUP_DIR}"
-touch "${LOG_FILE}"
-exec >>"${LOG_FILE}" 2>&1
+        _validate_release_payload_tree(destination)
 
-now_utc() {
-  date -u +"%Y-%m-%dT%H:%M:%SZ"
-}
+    @staticmethod
+    def _activate_release_payload(layout: ReleaseLayout, staged_payload: Path, target_version: str) -> Path:
+        release_dir = Path(tempfile.mkdtemp(prefix=f"{_safe_release_dir_prefix(target_version)}-", dir=layout.releases_dir))
+        current_tmp = layout.app_dir / f".current-{os.getpid()}"
+        previous_tmp = layout.app_dir / f".previous-{os.getpid()}"
+        old_release_dir = layout.current_link.resolve()
+        try:
+            for name in ("genapi", "VERSION", "web_dist"):
+                os.replace(staged_payload / name, release_dir / name)
+            (release_dir / "genapi").chmod(0o755)
+            _validate_release_payload_tree(release_dir)
 
-json_escape() {
-  printf "%s" "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
+            BinaryUpdateExecutor._remove_path(current_tmp)
+            BinaryUpdateExecutor._remove_path(previous_tmp)
+            current_tmp.symlink_to(release_dir)
+            previous_tmp.symlink_to(old_release_dir)
+            os.replace(previous_tmp, layout.previous_link)
+            os.replace(current_tmp, layout.current_link)
+        except Exception:
+            BinaryUpdateExecutor._remove_path(current_tmp)
+            BinaryUpdateExecutor._remove_path(previous_tmp)
+            shutil.rmtree(release_dir, ignore_errors=True)
+            raise
+        return layout.previous_link
 
-write_status() {
-  status="$1"
-  message="$2"
-  finished="${3:-}"
-  if [ -n "${finished}" ]; then
-    finished_json=", \"finished_at\": \"$(json_escape "${finished}")\""
-  else
-    finished_json=""
-  fi
-  status_tmp="${STATUS_FILE}.tmp.$$"
-  cat >"${status_tmp}" <<EOF
-{"status": "$(json_escape "${status}")", "message": "$(json_escape "${message}")", "target_tag": "$(json_escape "${TARGET_TAG}")", "target_version": "$(json_escape "${TARGET_VERSION}")", "release_url": "$(json_escape "${RELEASE_URL}")", "updated_at": "$(now_utc)"${finished_json}}
-EOF
-  mv "${status_tmp}" "${STATUS_FILE}"
-}
+    @staticmethod
+    def _backup_path(executable: Path) -> Path:
+        return Path(f"{executable}.backup")
 
-finish_failed() {
-  write_status "failed" "$1" "$(now_utc)"
-  exit 1
-}
+    @staticmethod
+    def _release_targets(executable: Path) -> list[Path]:
+        install_dir = executable.parent
+        return [executable, install_dir / "VERSION", install_dir / "web_dist"]
 
-compose() {
-  docker compose "$@"
-}
+    @staticmethod
+    def _remove_path(path: Path) -> None:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return
 
-health_check() {
-  [ -n "${HEALTH_URL}" ] || finish_failed "GENAPI_UPDATE_HEALTH_URL is required for safe updates"
-  deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
-  while [ "$(date +%s)" -le "${deadline}" ]; do
-    if ! health_body="$(wget -q -T 5 -O - "${HEALTH_URL}" 2>/dev/null)"; then
-      health_body=""
-    fi
-    if [ -n "${health_body}" ]; then
-      case "${HEALTH_URL}" in
-        */version)
-          if printf "%s" "${health_body}" | grep -F "${TARGET_VERSION}" >/dev/null 2>&1; then
+    @staticmethod
+    def _runtime_asset_marker() -> str | None:
+        machine = platform.machine().lower()
+        if machine in {"x86_64", "amd64"}:
+            return "linux_amd64"
+        if machine in {"aarch64", "arm64"}:
+            return "linux_arm64"
+        return None
+
+    def _download_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/octet-stream",
+            "User-Agent": "Genapi-Binary-Updater",
+        }
+        github_token = str(getattr(self.settings, "github_token", "") or "")
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+        return headers
+
+    def _timeout_seconds(self) -> int:
+        try:
+            timeout = int(getattr(self.settings, "timeout_seconds", 900) or 900)
+        except (TypeError, ValueError):
+            return 900
+        return max(1, timeout)
+
+    def _max_download_bytes(self) -> int:
+        try:
+            max_bytes = int(getattr(self.settings, "max_download_bytes", 524288000) or 524288000)
+        except (TypeError, ValueError):
+            return 524288000
+        return max(1, max_bytes)
+
+    @staticmethod
+    def _asset_size(asset: dict[str, Any]) -> int:
+        try:
+            return max(0, int(asset.get("size") or 0))
+        except (TypeError, ValueError):
             return 0
-          fi
-          ;;
-        *)
-          return 0
-          ;;
-      esac
-    fi
-    sleep 5
-  done
-  return 1
-}
 
-rollback_image() {
-  previous_image="$1"
-  [ -n "${previous_image}" ] || return 1
+    def _fetch_release_info(self, target_tag: str) -> dict[str, Any]:
+        from services.update_service import _release_info_from_payload
 
-  override="$(mktemp /tmp/genapi-rollback.XXXXXX.yml)"
-  cat >"${override}" <<EOF
-services:
-  ${SERVICE}:
-    image: ${previous_image}
-EOF
-  if ! docker compose -f docker-compose.yml -f "${override}" up -d "${SERVICE}"; then
-    rm -f "${override}"
-    return 1
-  fi
-  rm -f "${override}"
-}
+        repo = str(getattr(self.settings, "repo", "") or "")
+        if not repo:
+            raise ValueError("GENAPI_UPDATE_REPO must be set.")
+        tag_path = quote(target_tag, safe="")
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/releases/tags/{tag_path}",
+            headers=self._github_headers(),
+        )
+        with self._opener(request, timeout=self._timeout_seconds()) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub release response was not an object.")
+        return _release_info_from_payload(payload)
 
-target_image_from_ref() {
-  image_ref="$1"
-  [ -n "${image_ref}" ] || return 1
-  case "${image_ref}" in
-    *@*)
-      printf "%s:%s" "${image_ref%%@*}" "${TARGET_TAG}"
-      ;;
-    *:*)
-      prefix="${image_ref%:*}"
-      suffix="${image_ref##*:}"
-      case "${suffix}" in
-        */*)
-          printf "%s:%s" "${image_ref}" "${TARGET_TAG}"
-          ;;
-        *)
-          printf "%s:%s" "${prefix}" "${TARGET_TAG}"
-          ;;
-      esac
-      ;;
-    *)
-      printf "%s:%s" "${image_ref}" "${TARGET_TAG}"
-      ;;
-  esac
-}
+    def _github_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Genapi-Binary-Updater",
+        }
+        github_token = str(getattr(self.settings, "github_token", "") or "")
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+        return headers
 
-prepare_target_image_override() {
-  target_image="$1"
-  [ -n "${target_image}" ] || return 1
+    @staticmethod
+    def _write_job_status(
+        job_dir: Path,
+        *,
+        status: str,
+        message: str,
+        target_tag: str,
+        target_version: str,
+        release_url: str,
+        finished: bool = False,
+    ) -> None:
+        from services.update_service import _utc_now
 
-  target_override="$(mktemp /tmp/genapi-target-image.XXXXXX.yml)"
-  cat >"${target_override}" <<EOF
-services:
-  ${SERVICE}:
-    image: ${target_image}
-EOF
-  if ! docker compose -f docker-compose.yml -f "${target_override}" pull "${SERVICE}"; then
-    rm -f "${target_override}"
-    target_override=""
-    return 1
-  fi
-}
+        payload: dict[str, Any] = {
+            "status": status,
+            "message": message,
+            "target_tag": target_tag,
+            "target_version": target_version,
+            "release_url": release_url,
+            "updated_at": _utc_now(),
+        }
+        if finished:
+            payload["finished_at"] = _utc_now()
+        status_path = job_dir / "status.json"
+        temp_path = job_dir / f".{status_path.name}.tmp"
+        temp_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        os.replace(temp_path, status_path)
+        with (job_dir / "log.txt").open("a", encoding="utf-8") as log:
+            log.write(f"{payload['updated_at']} {message}\n")
 
-start_prepared_target_image_override() {
-  override="$1"
-  [ -n "${override}" ] || return 1
 
-  if ! docker compose -f docker-compose.yml -f "${override}" up -d "${SERVICE}"; then
-    rm -f "${override}"
-    return 1
-  fi
-  rm -f "${override}"
-}
+def _checksum_for_asset(asset_name: str, checksum_text: str) -> str | None:
+    asset_basename = Path(asset_name).name
+    for raw_line in checksum_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        sha_format = re.match(r"^SHA256\((?P<name>.+)\)\s*=\s*(?P<digest>[a-fA-F0-9]{64})$", line)
+        if sha_format and Path(sha_format.group("name")).name == asset_basename:
+            return sha_format.group("digest")
 
-restore_data_backup() {
-  backup_file="$1"
-  [ -n "${backup_file}" ] || return 1
-  [ -f "${backup_file}" ] || return 1
+        parts = line.split()
+        if len(parts) < 2 or not CHECKSUM_RE.match(parts[0]):
+            continue
+        digest = parts[0]
+        filename = parts[-1].lstrip("*")
+        if filename == asset_name or Path(filename).name == asset_basename:
+            return digest
+    return None
 
-  echo "Restoring data backup ${backup_file}"
-  restore_copy="$(mktemp /tmp/genapi-data-backup.XXXXXX.tar.gz)"
-  if ! cp "${backup_file}" "${restore_copy}"; then
-    rm -f "${restore_copy}"
-    return 1
-  fi
-  if ! tar -tzf "${backup_file}" >/dev/null 2>&1; then
-    rm -f "${restore_copy}"
-    return 1
-  fi
-  rm -rf "${COMPOSE_DIR}/data"
-  if ! tar -xzf "${restore_copy}" -C "${COMPOSE_DIR}"; then
-    rm -f "${restore_copy}"
-    return 1
-  fi
-  rm -f "${restore_copy}"
-}
 
-restart_service_after_backup_failure() {
-  echo "Restarting service ${SERVICE} after data backup failure"
-  if [ -n "${rollback_image_ref}" ]; then
-    rollback_image "${rollback_image_ref}" || compose up -d "${SERVICE}" || true
-    return 0
-  fi
-  compose up -d "${SERVICE}" || true
-}
+def _validate_tar_path(name: str) -> None:
+    path = PurePosixPath(name)
+    if not name or path.is_absolute() or any(part == ".." for part in path.parts):
+        raise ValueError(f"Archive contains unsafe path: {name}")
 
-echo "Starting Genapi update job ${JOB_ID}"
-write_status "running" "Starting Docker helper update"
 
-cd "${COMPOSE_DIR}"
-[ -f docker-compose.yml ] || finish_failed "docker-compose.yml was not found in compose directory"
-docker version >/dev/null 2>&1 || finish_failed "Docker daemon is not reachable through /var/run/docker.sock"
-docker compose version >/dev/null 2>&1 || finish_failed "docker compose is not available in the helper image"
-compose config >/dev/null || finish_failed "docker-compose.yml failed validation"
+def _find_release_payload_root(members: list[tarfile.TarInfo]) -> PurePosixPath:
+    member_by_path = {PurePosixPath(member.name): member for member in members}
+    for member in members:
+        member_path = PurePosixPath(member.name)
+        if member_path.name not in BINARY_NAMES or not member.isfile():
+            continue
+        root = member_path.parent
+        version_path = root / "VERSION"
+        web_dist_path = root / "web_dist"
+        version_member = member_by_path.get(version_path)
+        web_dist_member = member_by_path.get(web_dist_path)
+        if version_member is not None and version_member.isfile() and web_dist_member is not None and web_dist_member.isdir():
+            return root
+    raise ValueError("Release asset archive does not contain genapi, VERSION, and web_dist.")
 
-previous_container="$(compose ps -q "${SERVICE}" 2>/dev/null || true)"
-previous_image=""
-previous_image_ref=""
-rollback_image_ref=""
-if [ -n "${previous_container}" ]; then
-  previous_image="$(docker inspect --format '{{.Image}}' "${previous_container}" 2>/dev/null || true)"
-  previous_image_ref="$(docker inspect --format '{{.Config.Image}}' "${previous_container}" 2>/dev/null || true)"
-  if [ -n "${previous_image}" ]; then
-    rollback_image_ref="genapi-rollback-${JOB_ID}:previous"
-    docker tag "${previous_image}" "${rollback_image_ref}" || rollback_image_ref=""
-  fi
-fi
 
-if [ -z "${TARGET_IMAGE}" ]; then
-  TARGET_IMAGE="$(target_image_from_ref "${previous_image_ref}" || true)"
-fi
+def _relative_to_payload_root(path: PurePosixPath, root: PurePosixPath) -> PurePosixPath | None:
+    if str(root) == ".":
+        return path
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return None
 
-target_override=""
-if [ -n "${TARGET_IMAGE}" ]; then
-  echo "Pulling service ${SERVICE} image ${TARGET_IMAGE}"
-  prepare_target_image_override "${TARGET_IMAGE}" || finish_failed "Failed to pull ${SERVICE} image ${TARGET_IMAGE}"
-else
-  echo "Pulling service ${SERVICE}"
-  compose pull "${SERVICE}" || finish_failed "Failed to pull updated image for ${SERVICE}"
-fi
 
-backup=""
-if [ -d "${COMPOSE_DIR}/data" ]; then
-  backup="${BACKUP_DIR}/${JOB_ID}-data.tar.gz"
-  echo "Stopping service ${SERVICE} to create a consistent data backup"
-  compose stop "${SERVICE}" || finish_failed "Failed to stop ${SERVICE} before creating data backup"
-  echo "Creating data backup ${backup}"
-  if ! tar -czf "${backup}" -C "${COMPOSE_DIR}" data; then
-    restart_service_after_backup_failure
-    finish_failed "Failed to create data backup before updating ${SERVICE}"
-  fi
-fi
+def _validate_release_payload_tree(payload_dir: Path) -> None:
+    executable = payload_dir / "genapi"
+    if not executable.is_file():
+        raise ValueError("Release asset archive does not contain a genapi binary.")
+    if not (payload_dir / "VERSION").is_file():
+        raise ValueError("Release asset archive does not contain VERSION.")
+    if not (payload_dir / "web_dist").is_dir():
+        raise ValueError("Release asset archive does not contain web_dist.")
 
-if [ -n "${target_override}" ]; then
-  echo "Starting service ${SERVICE} with image ${TARGET_IMAGE}"
-  start_prepared_target_image_override "${target_override}" || finish_failed "Failed to start ${SERVICE} with ${TARGET_IMAGE}"
-else
-  echo "Starting service ${SERVICE}"
-  compose up -d "${SERVICE}" || finish_failed "Failed to start ${SERVICE}"
-fi
 
-if ! health_check; then
-  echo "Health check failed for ${HEALTH_URL}"
-  echo "Stopping service ${SERVICE} before failed-update recovery"
-  compose stop "${SERVICE}" || true
-  restore_ok=1
-  if [ -n "${backup}" ]; then
-    restore_ok=0
-    if restore_data_backup "${backup}"; then
-      restore_ok=1
-    fi
-  fi
-  rollback_ok=0
-  if rollback_image "${rollback_image_ref}"; then
-    rollback_ok=1
-  fi
-  if [ "${rollback_ok}" = "1" ] && [ "${restore_ok}" = "1" ]; then
-    write_status "failed" "Health check failed; restored previous image and data backup." "$(now_utc)"
-    exit 1
-  fi
-  if [ "${rollback_ok}" = "1" ]; then
-    finish_failed "Health check failed; restored previous image but data restore failed. Manual recovery may be required."
-  fi
-  if [ "${restore_ok}" = "1" ]; then
-    finish_failed "Health check failed; restored data backup but image rollback failed. Manual recovery may be required."
-  fi
-  finish_failed "Health check failed; image rollback and data restore failed. Manual recovery is required."
-fi
+def _safe_release_dir_prefix(version: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(version or "").strip().lstrip("v"))
+    value = value.strip(".-")
+    return f"release-{value or 'unknown'}"
 
-write_status "succeeded" "Update completed successfully" "$(now_utc)"
-echo "Update completed successfully"
-"""
-        return ["sh", "-c", script]
+
+DockerUpdateExecutor = BinaryUpdateExecutor

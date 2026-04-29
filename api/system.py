@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import sys
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +28,11 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/version")
     async def get_version():
         return {"version": app_version}
+
+    @router.get("/api/admin/system/version")
+    async def get_admin_system_version(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return _system_version_payload(app_version)
 
     @router.get("/api/settings")
     async def get_settings(authorization: str | None = Header(default=None)):
@@ -79,3 +87,18 @@ def create_router(app_version: str) -> APIRouter:
         }
 
     return router
+
+
+def _system_version_payload(app_version: str) -> dict[str, str]:
+    payload = {"version": app_version}
+    build_type = str(os.getenv("GENAPI_BUILD_TYPE") or "").strip()
+    deployment_mode = str(os.getenv("GENAPI_DEPLOYMENT_MODE") or "").strip()
+    if not build_type:
+        build_type = "binary" if bool(getattr(sys, "frozen", False)) else "source"
+    if not deployment_mode:
+        deployment_mode = "standalone" if bool(getattr(sys, "frozen", False)) else "source"
+    if build_type:
+        payload["build_type"] = build_type
+    if deployment_mode:
+        payload["deployment_mode"] = deployment_mode
+    return payload

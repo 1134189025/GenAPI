@@ -46,13 +46,26 @@ describe("admin operations dashboard pages", () => {
     expect(updateCard).toContain("版本更新中心");
     expect(updateCard).toContain("当前版本");
     expect(updateCard).toContain("最新版本");
-    expect(updateCard).toContain("一键更新");
-    expect(updateCard).toContain("预检");
+    expect(updateCard).toContain("更新系统");
     expect(updateCard).toContain("回滚");
-    expect(updateCard).toContain("GENAPI_ENABLE_WEB_UPDATER");
-    expect(updateCard).toContain("fetchUpdateStatus");
-    expect(updateCard).toContain("startSystemUpdate");
-    expect(api).toContain("UpdatePreflight");
+    expect(updateCard).toContain("重启服务");
+    expect(updateCard).toContain("Release 说明");
+    expect(updateCard).toContain("docker compose pull app && docker compose up -d app");
+    expect(updateCard).toContain("git pull && restart service manually");
+    expect(updateCard).toContain("checkSystemUpdates");
+    expect(updateCard).toContain("performSystemUpdate");
+    expect(updateCard).toContain("rollbackSystemUpdate");
+    expect(updateCard).toContain("restartSystemService");
+    expect(updateCard).not.toContain("GENAPI_ENABLE_WEB_UPDATER");
+    expect(updateCard).not.toContain("Docker socket");
+    expect(updateCard).not.toContain("Docker Socket");
+    expect(updateCard).not.toContain("一键更新");
+    expect(api).toContain("release_info");
+    expect(api).toContain("deployment_mode");
+    expect(api).toContain("checkSystemUpdates");
+    expect(api).toContain("performSystemUpdate");
+    expect(api).toContain("rollbackSystemUpdate");
+    expect(api).toContain("restartSystemService");
   });
 
   test("membership API and dashboard pages expose required frontend contracts", () => {

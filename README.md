@@ -234,10 +234,9 @@ cp .env.example .env
 - `STORAGE_BACKEND`：账号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
 - `DATABASE_URL`：账号池数据库地址。
 - `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
-- `GENAPI_ENABLE_WEB_UPDATER`：网页更新中心开关，默认关闭。只有设置为 `true` 时才会允许从网页端发起 Docker Compose 更新。
-- `GENAPI_UPDATE_COMPOSE_DIR`：宿主机上的 Compose 项目绝对路径，目录内应包含 `docker-compose.yml`。
-- `GENAPI_UPDATE_SERVICE`：Compose 中要更新的服务名，默认建议使用 `app`。
-- `GENAPI_UPDATE_HEALTH_URL`：一键更新必填。更新后用于确认服务可用的健康检查地址，例如 `http://host.docker.internal:3000/version`。不要使用 `localhost`、`127.0.0.1` 或 `::1`，因为健康检查在 Docker helper 容器内执行，loopback 会指向 helper 自身。
+- `GENAPI_DEPLOYMENT_MODE`：部署模式。systemd 二进制安装使用 `systemd-binary`，Docker 使用 `docker`，源码运行使用 `source`。
+- `GENAPI_BUILD_TYPE`：构建类型。GitHub Release 二进制使用 `release`，Docker 镜像使用 `docker`，源码运行使用 `source`。
+- `GENAPI_DATA_DIR`：运行时数据目录。systemd 二进制安装默认使用 `/opt/genapi/data`。
 - `GITHUB_TOKEN`：可选。用于访问 GitHub Releases API，避免匿名请求限流。
 
 运行时数据：
@@ -255,28 +254,38 @@ cp .env.example .env
 
 ## 网页更新中心
 
-网页更新中心默认关闭。关闭时，它只会提示需要设置 `GENAPI_ENABLE_WEB_UPDATER=true`，不会从网页端执行更新。
+网页一键更新只支持 systemd 二进制部署。该模式和 sub2api 一样：更新中心检查 GitHub Releases，下载当前系统架构对应的 `genapi_*_linux_*.tar.gz`，校验 `checksums.txt`，并把 `genapi`、`VERSION`、`web_dist` 作为同一组 release 资产安装到 `/opt/genapi/app/releases/`。运行入口是 `/opt/genapi/app/current` symlink，更新时会先准备完整新目录，再原子切换 `current`，旧版本保留在 `/opt/genapi/app/previous` 供网页回滚。安装脚本升级时会把完整旧版本备份到 `/var/backups/genapi`，回滚前同样会校验压缩包结构。更新完成后，网页会提示重启；重启通过退出进程触发 systemd 的 `Restart=always` 自动拉起。
 
-启用后，更新中心会检查 GitHub Releases 的最新版本；只有管理员显式点击更新且预检通过时，才会启动 Docker helper 容器执行 Docker Compose 更新。`GENAPI_UPDATE_COMPOSE_DIR` 必须填写宿主机上的 Compose 项目绝对路径，更新器会把该目录挂载到 helper 容器内的同一路径，确保 `./data:/app/data` 这类相对挂载仍解析到原宿主机目录。典型配置：
+推荐使用安装脚本部署：
 
-```yaml
-environment:
-  GENAPI_ENABLE_WEB_UPDATER: "true"
-  GENAPI_UPDATE_COMPOSE_DIR: /abs/path/to/GenAPI
-  GENAPI_UPDATE_SERVICE: app
-  GENAPI_UPDATE_HEALTH_URL: http://host.docker.internal:3000/version
-  # GITHUB_TOKEN: ghp_xxxxxxxxxxxx
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
+```bash
+curl -fsSL https://raw.githubusercontent.com/1134189025/GenAPI/main/deploy/install.sh | sudo bash
 ```
 
-安全警告：挂载 `/var/run/docker.sock` 后，Genapi 容器可以通过 Docker API 控制宿主机 Docker 守护进程。这通常等价于授予容器宿主机级别的管理权限。只应在可信服务器上启用，并确保管理员账号、反向代理、HTTPS、防火墙和后台访问控制都已正确配置。
+systemd 服务会写入以下关键环境变量：
 
-更新前预检会确认更新开关、Compose 目录绝对路径、`docker-compose.yml`、服务名、helper 镜像、健康检查 URL、超时时间以及 Docker 运行条件。更新器会先拉取目标镜像；拉取完成后才短暂停止应用服务，备份 `data/`，再启动目标版本。这样可以避免备份期间应用继续写入本地数据，同时把停机窗口限制在备份和重启阶段。
+```ini
+Environment=GENAPI_DEPLOYMENT_MODE=systemd-binary
+Environment=GENAPI_BUILD_TYPE=release
+Environment=GENAPI_DATA_DIR=/opt/genapi/data
+Environment=GENAPI_HOST=0.0.0.0
+Environment=GENAPI_PORT=3000
+```
 
-健康检查 URL 会由 bridge 网络里的 helper 容器访问，因此必须使用 helper 能访问到的地址。Docker 部署通常使用 `host.docker.internal`；`localhost`、`127.0.0.1` 和 `::1` 会在预检中被拒绝。
+Docker 和源码部署仍会显示版本检查结果，但网页不会执行一键更新。Docker 部署请继续使用手动 `docker compose pull app && docker compose up -d app`；源码部署请手动 `git pull` 后重启服务。
 
-如果备份创建失败，更新任务会写入 `failed` 状态并停止继续更新。如果 `GENAPI_UPDATE_HEALTH_URL` 健康检查失败，更新器会先停止当前失败版本，再尝试恢复更新前的数据备份并回滚到更新前镜像。若自动恢复任一步失败，任务日志和状态会提示需要管理员手动恢复。
+如果网页更新后服务无法启动，可以通过 SSH 手动恢复上一版：
+
+```bash
+sudo ln -sfn "$(readlink -f /opt/genapi/app/previous)" /opt/genapi/app/current
+sudo systemctl restart genapi
+```
+
+如果是通过安装脚本执行的升级，也可以使用脚本回滚到 `/var/backups/genapi` 中最近一次完整备份：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1134189025/GenAPI/main/deploy/install.sh | sudo bash -s -- rollback
+```
 
 ## 手动更新与恢复
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,8 +26,46 @@ class FakeHTTPResponse:
 
 
 class UpdateServiceTests(unittest.TestCase):
-    def test_release_status_detects_newer_semver_release(self) -> None:
+    def test_load_update_settings_reads_new_environment_and_explicit_mode(self) -> None:
+        from services.update_service import load_update_settings
+
+        with patch.dict(
+            os.environ,
+            {
+                "GENAPI_UPDATE_REPO": "owner/project",
+                "GITHUB_TOKEN": "ghs_secret",
+                "GENAPI_UPDATE_TIMEOUT_SECONDS": "123",
+                "GENAPI_DEPLOYMENT_MODE": "systemd-binary",
+                "GENAPI_BUILD_TYPE": "release",
+                "GENAPI_UPDATE_MAX_DOWNLOAD_BYTES": "4096",
+            },
+            clear=True,
+        ):
+            settings = load_update_settings()
+
+        self.assertEqual(settings.repo, "owner/project")
+        self.assertEqual(settings.github_token, "ghs_secret")
+        self.assertEqual(settings.timeout_seconds, 123)
+        self.assertEqual(settings.deployment_mode, "systemd-binary")
+        self.assertEqual(settings.build_type, "release")
+        self.assertEqual(settings.max_download_bytes, 4096)
+
+    def test_load_update_settings_auto_detects_frozen_binary_before_docker(self) -> None:
+        from services.update_service import load_update_settings
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(sys, "frozen", True, create=True):
+            settings = load_update_settings()
+
+        self.assertEqual(settings.repo, "1134189025/GenAPI")
+        self.assertEqual(settings.timeout_seconds, 900)
+        self.assertEqual(settings.deployment_mode, "systemd-binary")
+        self.assertEqual(settings.build_type, "source")
+        self.assertEqual(settings.max_download_bytes, 524288000)
+
+    def test_release_status_detects_newer_release_and_compatible_asset(self) -> None:
         from services.update_service import UpdateSettings, build_release_status
+
+        marker = _runtime_marker()
 
         def opener(request, timeout):
             self.assertEqual(request.full_url, "https://api.github.com/repos/owner/project/releases/latest")
@@ -38,35 +79,102 @@ class UpdateServiceTests(unittest.TestCase):
                     "body": "Release notes",
                     "prerelease": False,
                     "draft": False,
+                    "assets": [
+                        {
+                            "name": f"genapi_v0.1.4_{marker}.tar.gz",
+                            "browser_download_url": f"https://github.com/owner/project/releases/download/v0.1.4/genapi_v0.1.4_{marker}.tar.gz",
+                            "size": 1024,
+                        },
+                        {
+                            "name": "checksums.txt",
+                            "browser_download_url": "https://github.com/owner/project/releases/download/v0.1.4/checksums.txt",
+                            "size": 128,
+                        },
+                    ],
                 }
             )
 
         status = build_release_status(
             current_version="0.1.3",
-            settings=UpdateSettings(repo="owner/project", enabled=True),
+            settings=UpdateSettings(repo="owner/project", deployment_mode="systemd-binary", build_type="release"),
             opener=opener,
+            force=True,
         )
 
         self.assertTrue(status["update_available"])
+        self.assertTrue(status["has_update"])
+        self.assertTrue(status["can_update"])
         self.assertTrue(status["enabled"])
+        self.assertEqual(status["mode"], "systemd-binary")
+        self.assertEqual(status["deployment_mode"], "systemd-binary")
+        self.assertEqual(status["build_type"], "release")
         self.assertEqual(status["current_version"], "0.1.3")
         self.assertEqual(status["latest_version"], "0.1.4")
         self.assertEqual(status["latest_tag"], "v0.1.4")
         self.assertEqual(status["release_url"], "https://github.com/owner/project/releases/tag/v0.1.4")
+        self.assertEqual(status["release_info"]["assets"][0]["name"], f"genapi_v0.1.4_{marker}.tar.gz")
+        self.assertEqual(status["repo"], "owner/project")
 
-    def test_release_status_treats_disabled_updater_as_manual_only(self) -> None:
+    def test_release_status_requires_checksum_asset_for_web_update(self) -> None:
         from services.update_service import UpdateSettings, build_release_status
 
+        marker = _runtime_marker()
+
+        def opener(request, timeout):
+            return FakeHTTPResponse(
+                {
+                    "tag_name": "v0.1.6",
+                    "html_url": "https://github.com/owner/project/releases/tag/v0.1.6",
+                    "assets": [
+                        {
+                            "name": f"genapi_0.1.6_{marker}.tar.gz",
+                            "browser_download_url": f"https://github.com/owner/project/releases/download/v0.1.6/genapi_0.1.6_{marker}.tar.gz",
+                            "size": 1024,
+                        },
+                    ],
+                }
+            )
+
         status = build_release_status(
-            current_version="0.1.4",
-            settings=UpdateSettings(repo="owner/project", enabled=False),
-            opener=lambda request, timeout: FakeHTTPResponse({"tag_name": "v0.1.4"}),
+            current_version="0.1.5",
+            settings=UpdateSettings(repo="owner/project", deployment_mode="systemd-binary", build_type="release"),
+            opener=opener,
+            force=True,
         )
 
-        self.assertFalse(status["enabled"])
-        self.assertFalse(status["update_available"])
-        self.assertEqual(status["mode"], "manual")
-        self.assertIn("GENAPI_ENABLE_WEB_UPDATER", status["disabled_reason"])
+        self.assertTrue(status["update_available"])
+        self.assertFalse(status["can_update"])
+        self.assertIn("checksums.txt", status["warning"])
+
+    def test_release_status_checks_github_in_source_mode_without_enable_gate(self) -> None:
+        from services.update_service import UpdateSettings, build_release_status
+
+        calls: list[str] = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            return FakeHTTPResponse(
+                {
+                    "tag_name": "v0.1.4",
+                    "html_url": "https://github.com/owner/project/releases/tag/v0.1.4",
+                    "assets": [],
+                }
+            )
+
+        status = build_release_status(
+            current_version="0.1.3",
+            settings=UpdateSettings(repo="owner/project", deployment_mode="source", build_type="source"),
+            opener=opener,
+        )
+
+        self.assertEqual(calls, ["https://api.github.com/repos/owner/project/releases/latest"])
+        self.assertTrue(status["enabled"])
+        self.assertTrue(status["update_available"])
+        self.assertTrue(status["has_update"])
+        self.assertFalse(status["can_update"])
+        self.assertEqual(status["mode"], "source")
+        self.assertEqual(status["deployment_mode"], "source")
+        self.assertNotIn("disabled_reason", status)
 
     def test_release_status_uses_cache_until_force_refresh(self) -> None:
         from services.update_service import UpdateSettings, build_release_status
@@ -77,7 +185,7 @@ class UpdateServiceTests(unittest.TestCase):
             calls.append(request.full_url)
             return FakeHTTPResponse({"tag_name": f"v0.1.{3 + len(calls)}"})
 
-        settings = UpdateSettings(repo="owner/cache-test", enabled=True)
+        settings = UpdateSettings(repo="owner/cache-test", deployment_mode="systemd-binary", build_type="release")
 
         first = build_release_status(current_version="0.1.3", settings=settings, opener=opener)
         second = build_release_status(current_version="0.1.3", settings=settings, opener=opener)
@@ -87,6 +195,34 @@ class UpdateServiceTests(unittest.TestCase):
         self.assertEqual(second["latest_tag"], "v0.1.4")
         self.assertEqual(forced["latest_tag"], "v0.1.5")
         self.assertEqual(len(calls), 2)
+
+    def test_release_status_network_error_preserves_core_fields(self) -> None:
+        from services.update_service import UpdateSettings, build_release_status
+
+        def opener(request, timeout):
+            raise OSError("network down")
+
+        status = build_release_status(
+            current_version="0.1.3",
+            settings=UpdateSettings(repo="owner/project", deployment_mode="systemd-binary", build_type="release"),
+            opener=opener,
+            force=True,
+        )
+
+        self.assertTrue(status["enabled"])
+        self.assertFalse(status["can_update"])
+        self.assertFalse(status["update_available"])
+        self.assertFalse(status["has_update"])
+        self.assertEqual(status["mode"], "systemd-binary")
+        self.assertEqual(status["deployment_mode"], "systemd-binary")
+        self.assertEqual(status["build_type"], "release")
+        self.assertEqual(status["current_version"], "0.1.3")
+        self.assertEqual(status["latest_version"], "")
+        self.assertEqual(status["latest_tag"], "")
+        self.assertEqual(status["release_url"], "")
+        self.assertEqual(status["release_info"], {})
+        self.assertEqual(status["repo"], "owner/project")
+        self.assertIn("Failed to check GitHub Release", status["error"])
 
     def test_update_job_store_merges_helper_status_and_logs(self) -> None:
         from services.update_service import UpdateJobStore
@@ -294,6 +430,13 @@ class UpdateServiceTests(unittest.TestCase):
 
             self.assertEqual(loaded["status"], "pending")
             self.assertIn("status_error", loaded)
+
+
+def _runtime_marker() -> str:
+    machine = platform.machine().lower()
+    if machine in {"aarch64", "arm64"}:
+        return "linux_arm64"
+    return "linux_amd64"
 
 
 if __name__ == "__main__":

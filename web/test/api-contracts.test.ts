@@ -36,12 +36,24 @@ describe("frontend backend API contracts", () => {
   });
 
   test("exposes admin update center API contracts", async () => {
+    await api.getSystemVersion();
+    await api.checkSystemUpdates();
+    await api.checkSystemUpdates(true);
+    await api.performSystemUpdate();
+    await api.rollbackSystemUpdate();
+    await api.restartSystemService();
     await api.fetchUpdateStatus();
     await api.fetchUpdateStatus(true);
     await api.startSystemUpdate();
     await api.fetchUpdateJob("job-a");
 
     expect(httpRequest.mock.calls).toEqual([
+      ["/api/admin/system/version"],
+      ["/api/admin/system/check-updates"],
+      ["/api/admin/system/check-updates?force=true"],
+      ["/api/admin/system/update", { method: "POST" }],
+      ["/api/admin/system/rollback", { method: "POST" }],
+      ["/api/admin/system/restart", { method: "POST" }],
       ["/api/admin/update/status"],
       ["/api/admin/update/status?force=true"],
       ["/api/admin/update/start", { method: "POST" }],

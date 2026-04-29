@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 from pathlib import Path
+import sys
 from threading import Event, Thread
 from urllib.parse import urlsplit
 
@@ -12,7 +13,16 @@ from services.config import config
 from services.user_service import user_service
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-WEB_DIST_DIR = BASE_DIR / "web_dist"
+
+
+def _resolve_web_dist_dir() -> Path:
+    meipass = getattr(sys, "_MEIPASS", "")
+    if bool(getattr(sys, "frozen", False)) and meipass:
+        return Path(str(meipass)).expanduser() / "web_dist"
+    return BASE_DIR / "web_dist"
+
+
+WEB_DIST_DIR = _resolve_web_dist_dir()
 
 
 def extract_bearer_token(authorization: str | None) -> str:

@@ -1,0 +1,23 @@
+[Unit]
+Description=Genapi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=genapi
+Group=genapi
+WorkingDirectory=/opt/genapi/app/current
+ExecStart=/opt/genapi/app/current/genapi
+Restart=always
+RestartSec=5
+ReadWritePaths=/opt/genapi/app /opt/genapi/data
+Environment=GENAPI_DEPLOYMENT_MODE=systemd-binary
+Environment=GENAPI_BUILD_TYPE=release
+Environment=GENAPI_DATA_DIR=/opt/genapi/data
+Environment=GENAPI_HOST=0.0.0.0
+Environment=GENAPI_PORT=3000
+Environment=GENAPI_UPDATE_REPO=1134189025/GenAPI
+
+[Install]
+WantedBy=multi-user.target
