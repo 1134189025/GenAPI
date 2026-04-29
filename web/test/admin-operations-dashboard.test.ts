@@ -37,6 +37,24 @@ describe("admin operations dashboard pages", () => {
     expect(api).toContain("image_cache_auto_delete_enabled");
   });
 
+  test("version update center is exposed in the settings UI", () => {
+    const settingsPage = source("src/app/settings/page.tsx");
+    const updateCard = source("src/app/settings/components/update-card.tsx");
+    const api = source("src/lib/api.ts");
+
+    expect(settingsPage).toContain("UpdateCard");
+    expect(updateCard).toContain("版本更新中心");
+    expect(updateCard).toContain("当前版本");
+    expect(updateCard).toContain("最新版本");
+    expect(updateCard).toContain("一键更新");
+    expect(updateCard).toContain("预检");
+    expect(updateCard).toContain("回滚");
+    expect(updateCard).toContain("GENAPI_ENABLE_WEB_UPDATER");
+    expect(updateCard).toContain("fetchUpdateStatus");
+    expect(updateCard).toContain("startSystemUpdate");
+    expect(api).toContain("UpdatePreflight");
+  });
+
   test("membership API and dashboard pages expose required frontend contracts", () => {
     const api = source("src/lib/api.ts");
     const membershipPage = source("src/app/membership/page.tsx");

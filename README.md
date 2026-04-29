@@ -234,6 +234,11 @@ cp .env.example .env
 - `STORAGE_BACKEND`：账号池存储后端，可选 `json`、`sqlite`、`postgres`、`git`。
 - `DATABASE_URL`：账号池数据库地址。
 - `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
+- `GENAPI_ENABLE_WEB_UPDATER`：网页更新中心开关，默认关闭。只有设置为 `true` 时才会允许从网页端发起 Docker Compose 更新。
+- `GENAPI_UPDATE_COMPOSE_DIR`：宿主机上的 Compose 项目绝对路径，目录内应包含 `docker-compose.yml`。
+- `GENAPI_UPDATE_SERVICE`：Compose 中要更新的服务名，默认建议使用 `app`。
+- `GENAPI_UPDATE_HEALTH_URL`：一键更新必填。更新后用于确认服务可用的健康检查地址，例如 `http://host.docker.internal:3000/version`。
+- `GITHUB_TOKEN`：可选。用于访问 GitHub Releases API，避免匿名请求限流。
 
 运行时数据：
 
@@ -247,6 +252,58 @@ cp .env.example .env
 这些文件包含敏感信息，不应提交到仓库。
 
 图片缓存会在服务启动、保存新图片后和后台定时任务中自动清理。后台系统设置支持调整图片保留天数、缓存大小上限和自动删除开关。
+
+## 网页更新中心
+
+网页更新中心默认关闭。关闭时，它只会提示需要设置 `GENAPI_ENABLE_WEB_UPDATER=true`，不会从网页端执行更新。
+
+启用后，更新中心会检查 GitHub Releases 的最新版本；只有管理员显式点击更新且预检通过时，才会启动 Docker helper 容器执行 Docker Compose 更新。`GENAPI_UPDATE_COMPOSE_DIR` 必须填写宿主机上的 Compose 项目绝对路径，更新器会把该目录挂载到 helper 容器内的同一路径，确保 `./data:/app/data` 这类相对挂载仍解析到原宿主机目录。典型配置：
+
+```yaml
+environment:
+  GENAPI_ENABLE_WEB_UPDATER: "true"
+  GENAPI_UPDATE_COMPOSE_DIR: /abs/path/to/GenAPI
+  GENAPI_UPDATE_SERVICE: app
+  GENAPI_UPDATE_HEALTH_URL: http://host.docker.internal:3000/version
+  # GITHUB_TOKEN: ghp_xxxxxxxxxxxx
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+```
+
+安全警告：挂载 `/var/run/docker.sock` 后，Genapi 容器可以通过 Docker API 控制宿主机 Docker 守护进程。这通常等价于授予容器宿主机级别的管理权限。只应在可信服务器上启用，并确保管理员账号、反向代理、HTTPS、防火墙和后台访问控制都已正确配置。
+
+更新器会在 Compose 项目目录下备份 `data/`，然后执行 `docker compose pull app` 和 `docker compose up -d app`。如果 `GENAPI_UPDATE_HEALTH_URL` 健康检查失败，更新器只会尝试回滚应用镜像；数据不会自动回滚。如果需要恢复数据，必须由管理员从备份中手动恢复。
+
+## 手动更新与恢复
+
+手动更新前先备份运行时数据：
+
+```bash
+tar -czf genapi-data-backup-$(date +%Y%m%d-%H%M%S).tar.gz data
+```
+
+拉取并重启应用服务：
+
+```bash
+docker compose pull app
+docker compose up -d app
+docker compose ps app
+```
+
+如果应用镜像需要回滚，先选择要回滚到的旧镜像标签或镜像 digest，然后只覆盖应用服务镜像：
+
+```bash
+PREVIOUS_IMAGE=ghcr.io/1134189025/genapi:0.1.3
+cat > /tmp/genapi-rollback.yml <<EOF
+services:
+  app:
+    image: ${PREVIOUS_IMAGE}
+EOF
+docker compose -f docker-compose.yml -f /tmp/genapi-rollback.yml up -d app
+rm -f /tmp/genapi-rollback.yml
+```
+
+上面的回滚只回滚应用镜像，不会恢复数据库、图片缓存、配置或账号池数据。若需要恢复数据，请先停止服务，再从更新前备份中手动恢复 `data/` 或外部数据库，并确认文件权限后重新启动服务。
 
 ## 本地开发
 

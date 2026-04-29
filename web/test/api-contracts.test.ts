@@ -15,4 +15,17 @@ describe("frontend backend API contracts", () => {
     expect(api).not.toContain('"/api/proxy"');
     expect(api).toContain('"/api/proxy/test"');
   });
+
+  test("exposes admin update center API contracts", () => {
+    const api = source("src/lib/api.ts");
+
+    expect(api).toContain("UpdateStatus");
+    expect(api).toContain("UpdateJob");
+    expect(api).toContain("fetchUpdateStatus");
+    expect(api).toContain("startSystemUpdate");
+    expect(api).toContain("fetchUpdateJob");
+    expect(api).toContain('"/api/admin/update/status"');
+    expect(api).toContain('"/api/admin/update/start"');
+    expect(api).toContain('`/api/admin/update/jobs/${jobId}`');
+  });
 });

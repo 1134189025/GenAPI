@@ -9,9 +9,21 @@ services:
       - "8000:80"
     volumes:
       - ./data:/app/data
+      # Web 更新中心需要宿主机 Docker Socket。启用前请阅读安全说明。
+      # - /var/run/docker.sock:/var/run/docker.sock
     environment:
       STORAGE_BACKEND: sqlite
       DATABASE_URL: sqlite:////app/data/accounts.db
+      # Web 更新中心默认关闭。启用后会先检查 GitHub Releases，
+      # 仅在显式开启时才会发起 Docker Compose 更新。
+      # GENAPI_ENABLE_WEB_UPDATER: "true"
+      # GENAPI_UPDATE_COMPOSE_DIR: /abs/path/to/compose
+      # GENAPI_UPDATE_SERVICE: app
+      # 一键更新必填：用于更新后确认服务可用，失败时才会触发镜像回滚。
+      # GENAPI_UPDATE_HEALTH_URL: http://host.docker.internal:8000/version
+      # GITHUB_TOKEN: ghp_xxxxxxxxxxxx
+    # Docker Socket 挂载后，更新器可以通过 Docker API 控制宿主机上的
+    # Compose 项目。这等价于授予容器宿主机级别的管理能力，请谨慎启用。
     # 存储后端配置 (可选值: json, sqlite, postgres, git)
     # environment:
     #   STORAGE_BACKEND: json

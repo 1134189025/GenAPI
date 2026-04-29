@@ -23,7 +23,8 @@
 | CPA 导入进度跟踪 | ✅  | 已支持导入进度展示与轮询更新。 |
 | `sub2api` 连接管理与账号浏览 | ✅  | 已支持 `sub2api` 服务器的新增、修改、删除、分组查询和 OpenAI OAuth 账号列表读取。 |
 | `sub2api` 导入 | ✅  | 已支持勾选 `sub2api` 中的 OpenAI OAuth 账号，批量拉取 `access_token` 导入本地号池，并展示导入进度。 |
-| Docker 自托管部署 | ✅  | 已支持 Docker Compose 部署，并提供多架构镜像；默认 compose 暴露 `3000`，本地构建 compose 暴露 `8001`。 |
+| Docker 自托管部署 | ✅  | 已支持 Docker Compose 部署，并提供多架构镜像；默认 compose 暴露 `3000`，本地构建 compose 暴露 `8000`。 |
+| 网页更新中心 | ⚠️ | 可选能力，默认关闭。启用 `GENAPI_ENABLE_WEB_UPDATER=true` 并挂载 Docker Socket 后，可检查 GitHub Releases 并在管理员显式操作时启动 Docker Compose 更新。 |
 | 网页多参考图能力 | ✅  | 已实现，支持在网页编辑模式传入多参考图。 |
 | 更高级的 Token 调度策略 | ⚠️ | 当前已有基础轮询与限流刷新机制，更复杂的调度策略仍在完善中。 |
 | Render / Vercel 等部署表述 | ⚠️ | 当前主要以 Docker 部署为主，其他平台部署方式暂未重点说明。 |

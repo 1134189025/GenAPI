@@ -254,6 +254,53 @@ export type RegisterConfig = {
   }>;
 };
 
+export type UpdatePreflight = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  [key: string]: unknown;
+};
+
+export type UpdateStatus = {
+  enabled: boolean;
+  mode: "manual" | "docker-compose" | string;
+  update_available: boolean;
+  current_version: string;
+  latest_version?: string;
+  latest_tag?: string;
+  release_url?: string;
+  checked_at?: string;
+  disabled_reason?: string;
+  error?: string;
+  repo?: string;
+  service?: string;
+  compose_dir?: string;
+  helper_image?: string;
+  [key: string]: unknown;
+};
+
+export type UpdateJob = {
+  id: string;
+  status: "pending" | "running" | "in_progress" | "updating" | "succeeded" | "success" | "failed" | "cancelled" | string;
+  target_version?: string;
+  target_tag?: string;
+  release_url?: string;
+  actor_id?: string;
+  message?: string;
+  error?: string;
+  logs?: string[];
+  created_at?: string;
+  updated_at?: string;
+  finished_at?: string;
+  [key: string]: unknown;
+};
+
+export type UpdateStatusResponse = {
+  status: UpdateStatus;
+  preflight: UpdatePreflight;
+  jobs: UpdateJob[];
+};
+
 export async function fetchSetupStatus() {
   return httpRequest<SetupStatus>("/api/setup/status", { redirectOnUnauthorized: false });
 }
@@ -409,6 +456,19 @@ export async function editImage(
 
 export async function fetchSettingsConfig() {
   return httpRequest<{ config: SettingsConfig; image_cache?: ImageCacheStatus }>("/api/settings");
+}
+
+export async function fetchUpdateStatus(force = false) {
+  const path = "/api/admin/update/status";
+  return httpRequest<UpdateStatusResponse>(force ? `${path}?force=true` : path);
+}
+
+export async function startSystemUpdate() {
+  return httpRequest<{ job: UpdateJob }>("/api/admin/update/start", { method: "POST" });
+}
+
+export async function fetchUpdateJob(jobId: string) {
+  return httpRequest<{ job: UpdateJob }>(`/api/admin/update/jobs/${jobId}`);
 }
 
 export async function updateSettingsConfig(settings: Partial<SettingsConfig>) {

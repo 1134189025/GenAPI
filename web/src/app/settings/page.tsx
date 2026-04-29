@@ -13,6 +13,7 @@ import { CPAPoolsCard } from "./components/cpa-pools-card";
 import { ImportBrowserDialog } from "./components/import-browser-dialog";
 import { SettingsHeader } from "./components/settings-header";
 import { Sub2APIConnections } from "./components/sub2api-connections";
+import { UpdateCard } from "./components/update-card";
 import { useSettingsStore } from "./store";
 
 function SettingsDataController() {
@@ -92,6 +93,7 @@ function SettingsPageContent() {
       <SettingsHeader />
       <SettingsOverviewStats />
       <section className="space-y-6">
+        <UpdateCard />
         <ConfigCard />
         <AuthSettingsCard />
         <CPAPoolsCard />
