@@ -15,7 +15,7 @@ from services.account_service import account_service
 from services.config import config
 from services.image_cache_service import locked_image_cache
 from services.openai_backend_api import OpenAIBackendAPI
-from utils.helper import IMAGE_MODELS
+from utils.helper import IMAGE_MODELS, anonymize_token, redact_sensitive_text
 from utils.log import logger
 
 
@@ -576,11 +576,15 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
             except Exception as exc:
                 account_service.mark_image_result(token, False)
                 last_error = str(exc)
-                logger.warning({"event": "image_stream_fail", "request_token": token, "error": last_error})
+                logger.warning({
+                    "event": "image_stream_fail",
+                    "token_ref": anonymize_token(token),
+                    "error": redact_sensitive_text(last_error, [token]),
+                })
                 if not emitted_for_token and is_token_invalid_error(last_error):
                     account_service.remove_invalid_token(token, "image_stream")
                     continue
-                raise ImageGenerationError(last_error or "image generation failed") from exc
+                raise ImageGenerationError(redact_sensitive_text(last_error, [token]) or "image generation failed") from exc
 
     if not emitted:
         raise ImageGenerationError(last_error or "image generation failed")

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
 from pathlib import Path
 from threading import Event, Thread
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
@@ -35,8 +37,69 @@ def require_admin(authorization: str | None) -> dict[str, object]:
     return identity
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _safe_host(value: object) -> str:
+    host = str(value or "").strip()
+    if not host or _has_control_chars(host):
+        return ""
+    if any(char in host for char in "/?#@"):
+        return ""
+    try:
+        parsed = urlsplit(f"//{host}")
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return ""
+    if not parsed.netloc or parsed.username or parsed.password or not hostname:
+        return ""
+    normalized = hostname.rstrip(".").lower()
+    if normalized == "localhost":
+        return parsed.netloc
+    try:
+        address = ip_address(normalized)
+    except ValueError:
+        return ""
+    if address.is_loopback or address.is_private or address.is_link_local:
+        return parsed.netloc
+    return ""
+
+
+def _safe_base_url(value: object) -> str:
+    base_url = str(value or "").strip().rstrip("/")
+    if not base_url or _has_control_chars(base_url):
+        return ""
+    try:
+        parsed = urlsplit(base_url)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"}:
+        return ""
+    try:
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return ""
+    if not hostname:
+        return ""
+    if not parsed.netloc or parsed.username or parsed.password:
+        return ""
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def resolve_image_base_url(request: Request) -> str:
-    return config.base_url or f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+    configured = _safe_base_url(config.base_url)
+    if configured:
+        return configured
+    scheme = str(request.url.scheme or "http").strip().lower()
+    if scheme not in {"http", "https"}:
+        scheme = "http"
+    host = _safe_host(request.headers.get("host")) or _safe_host(request.url.netloc)
+    return f"{scheme}://{host}" if host else ""
 
 
 def raise_image_quota_error(exc: Exception) -> None:

@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class FakeHTTPResponse:
@@ -111,6 +112,188 @@ class UpdateServiceTests(unittest.TestCase):
             self.assertEqual(loaded["status"], "succeeded")
             self.assertEqual(loaded["finished_at"], "2026-04-29T12:30:00Z")
             self.assertEqual(loaded["logs"], ["line one", "line two"])
+
+    def test_update_job_store_rejects_concurrent_active_job_creation(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            first = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            second = store.create_if_idle(
+                target_version="0.1.5",
+                target_tag="v0.1.5",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.5",
+                actor_id="admin-id-2",
+            )
+
+            self.assertIsNotNone(first)
+            self.assertIsNone(second)
+
+    def test_update_job_store_keeps_existing_lock_without_active_job(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            store.jobs_dir.mkdir(parents=True, exist_ok=True)
+            store.active_lock_path.write_text("claimed-by-other-request", encoding="utf-8")
+
+            job = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+
+            self.assertIsNone(job)
+            self.assertEqual(store.active_lock_path.read_text(encoding="utf-8"), "claimed-by-other-request")
+
+    def test_update_job_store_recovers_terminal_helper_status_without_prior_poll(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            job = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            self.assertIsNotNone(job)
+            job_dir = Path(tmp_dir) / "update-jobs" / job["id"]
+            (job_dir / "status.json").write_text(
+                json.dumps({"status": "succeeded", "finished_at": "2026-04-29T12:30:00Z"}),
+                encoding="utf-8",
+            )
+
+            next_job = store.create_if_idle(
+                target_version="0.1.5",
+                target_tag="v0.1.5",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.5",
+                actor_id="admin-id-2",
+            )
+
+            self.assertIsNotNone(next_job)
+            self.assertEqual(next_job["target_version"], "0.1.5")
+            self.assertTrue(store.active_lock_path.exists())
+
+    def test_update_job_store_releases_active_lock_when_helper_status_is_terminal(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            job = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            self.assertIsNotNone(job)
+            self.assertTrue(store.active_lock_path.exists())
+            job_dir = Path(tmp_dir) / "update-jobs" / job["id"]
+            (job_dir / "status.json").write_text(
+                json.dumps({"status": "succeeded", "finished_at": "2026-04-29T12:30:00Z"}),
+                encoding="utf-8",
+            )
+
+            loaded = store.get(job["id"])
+            self.assertEqual(loaded["status"], "succeeded")
+            self.assertFalse(store.active_lock_path.exists())
+
+            next_job = store.create_if_idle(
+                target_version="0.1.5",
+                target_tag="v0.1.5",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.5",
+                actor_id="admin-id-2",
+            )
+
+            self.assertIsNotNone(next_job)
+            self.assertTrue(store.active_lock_path.exists())
+
+    def test_update_job_store_keeps_active_lock_when_helper_status_is_active(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            job = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            self.assertIsNotNone(job)
+            job_dir = Path(tmp_dir) / "update-jobs" / job["id"]
+            (job_dir / "status.json").write_text(
+                json.dumps({"status": "running", "message": "helper still running"}),
+                encoding="utf-8",
+            )
+
+            loaded = store.get(job["id"])
+            next_job = store.create_if_idle(
+                target_version="0.1.5",
+                target_tag="v0.1.5",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.5",
+                actor_id="admin-id-2",
+            )
+
+            self.assertEqual(loaded["status"], "running")
+            self.assertTrue(store.active_lock_path.exists())
+            self.assertIsNone(next_job)
+
+    def test_update_job_store_recovers_stale_active_job(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir), active_job_stale_seconds=60)
+            job = store.create_if_idle(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            self.assertIsNotNone(job)
+            job_dir = Path(tmp_dir) / "update-jobs" / job["id"]
+            job_path = job_dir / "job.json"
+            payload = json.loads(job_path.read_text(encoding="utf-8"))
+            payload["status"] = "running"
+            payload["updated_at"] = "2026-04-29T12:00:00Z"
+            job_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch("services.update_service._utc_now", return_value="2026-04-29T12:02:01Z"):
+                next_job = store.create_if_idle(
+                    target_version="0.1.5",
+                    target_tag="v0.1.5",
+                    release_url="https://github.com/owner/project/releases/tag/v0.1.5",
+                    actor_id="admin-id-2",
+                )
+
+            self.assertIsNotNone(next_job)
+            stale_job = store.get(job["id"])
+            self.assertEqual(stale_job["status"], "failed")
+            self.assertIn("stale", stale_job["error"])
+
+    def test_update_job_store_ignores_partial_helper_status_json(self) -> None:
+        from services.update_service import UpdateJobStore
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = UpdateJobStore(Path(tmp_dir))
+            job = store.create(
+                target_version="0.1.4",
+                target_tag="v0.1.4",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.4",
+                actor_id="admin-id",
+            )
+            job_dir = Path(tmp_dir) / "update-jobs" / job["id"]
+            (job_dir / "status.json").write_text('{"status": "running"', encoding="utf-8")
+
+            loaded = store.get(job["id"])
+
+            self.assertEqual(loaded["status"], "pending")
+            self.assertIn("status_error", loaded)
 
 
 if __name__ == "__main__":

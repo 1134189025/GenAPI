@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from curl_cffi.requests import Session
 
 from services.config import config
+from utils.helper import redact_sensitive_text
 
 
 class ProxySettingsStore:
@@ -54,7 +55,7 @@ def test_proxy(url: str, *, timeout: float = 15.0) -> dict:
             "ok": False,
             "status": 0,
             "latency_ms": latency_ms,
-            "error": str(exc) or exc.__class__.__name__,
+            "error": redact_sensitive_text(str(exc)) or exc.__class__.__name__,
         }
     finally:
         session.close()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.support import extract_bearer_token, require_admin, require_identity
@@ -167,7 +168,7 @@ def create_router(app_version: str) -> APIRouter:
         try:
             code = user_service.create_email_verification_code(body.email, "register")
             try:
-                email_service.send_verification_code(body.email, code)
+                await run_in_threadpool(email_service.send_verification_code, body.email, code)
             except UserServiceError:
                 user_service.discard_email_verification_code(body.email, code, "register")
                 raise
@@ -178,7 +179,8 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/api/auth/register")
     async def register(body: RegisterRequest):
         try:
-            result = user_service.register(
+            result = await run_in_threadpool(
+                user_service.register,
                 email=body.email,
                 password=body.password,
                 verification_code=body.verification_code,
@@ -192,7 +194,8 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/api/auth/login")
     async def login(body: LoginRequest):
         try:
-            return auth_payload(user_service.login(body.email, body.password), app_version)
+            result = await run_in_threadpool(user_service.login, body.email, body.password)
+            return auth_payload(result, app_version)
         except UserServiceError as exc:
             raise_user_error(exc)
 

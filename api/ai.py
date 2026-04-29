@@ -6,12 +6,21 @@ from pydantic import BaseModel, Field
 
 from api.support import require_identity, resolve_image_base_url
 from services.log_service import LoggedCall
-from services.quota_service import openai_quota_error, reserve_image_quota
+from services.quota_service import openai_quota_error, reserve_image_quota, settle_image_quota
 from services.user_service import UserServiceError
 from services.protocol import (
     openai_v1_image_edit,
     openai_v1_image_generations,
 )
+
+IMAGE_EDIT_MAX_FILES = 4
+IMAGE_EDIT_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
+IMAGE_EDIT_MAX_TOTAL_SIZE_BYTES = 80 * 1024 * 1024
+IMAGE_EDIT_MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+
+
+def image_edit_max_request_size_bytes() -> int:
+    return IMAGE_EDIT_MAX_TOTAL_SIZE_BYTES + IMAGE_EDIT_MAX_MULTIPART_OVERHEAD_BYTES
 
 
 class ImageGenerationRequest(BaseModel):
@@ -31,6 +40,32 @@ def _reserve_or_error(identity: dict[str, object], count: int, endpoint: str):
         if exc.status_code == 429:
             return JSONResponse(status_code=429, content=openai_quota_error(exc))
         raise HTTPException(status_code=exc.status_code, detail={"error": exc.message}) from exc
+
+
+async def _read_limited_uploads(uploads: list[UploadFile]) -> list[tuple[bytes, str, str]]:
+    if len(uploads) > IMAGE_EDIT_MAX_FILES:
+        raise HTTPException(status_code=400, detail={"error": "image count must be between 1 and 4"})
+    images: list[tuple[bytes, str, str]] = []
+    total_size = 0
+    chunk_size = 1024 * 1024
+    for upload in uploads:
+        chunks: list[bytes] = []
+        file_size = 0
+        while True:
+            chunk = await upload.read(chunk_size)
+            if not chunk:
+                break
+            file_size += len(chunk)
+            total_size += len(chunk)
+            if file_size > IMAGE_EDIT_MAX_FILE_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail={"error": "image file is too large"})
+            if total_size > IMAGE_EDIT_MAX_TOTAL_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail={"error": "image files are too large"})
+            chunks.append(chunk)
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail={"error": "image file is empty"})
+        images.append((b"".join(chunks), upload.filename or "image.png", upload.content_type or "image/png"))
+    return images
 
 
 def create_router() -> APIRouter:
@@ -70,12 +105,17 @@ def create_router() -> APIRouter:
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
-        images: list[tuple[bytes, str, str]] = []
-        for upload in uploads:
-            image_data = await upload.read()
-            if not image_data:
-                raise HTTPException(status_code=400, detail={"error": "image file is empty"})
-            images.append((image_data, upload.filename or "image.png", upload.content_type or "image/png"))
+        quota_reservation = _reserve_or_error(identity, n, "/api/image/edits")
+        if isinstance(quota_reservation, JSONResponse):
+            return quota_reservation
+        try:
+            images = await _read_limited_uploads(uploads)
+        except HTTPException as exc:
+            settle_image_quota(quota_reservation, success=False, error=str(exc.detail))
+            raise
+        except Exception as exc:
+            settle_image_quota(quota_reservation, success=False, error=str(exc))
+            raise
         payload = {
             "prompt": prompt,
             "images": images,
@@ -86,9 +126,6 @@ def create_router() -> APIRouter:
             "stream": stream,
             "base_url": resolve_image_base_url(request),
         }
-        quota_reservation = _reserve_or_error(identity, n, "/api/image/edits")
-        if isinstance(quota_reservation, JSONResponse):
-            return quota_reservation
         call = LoggedCall(identity, "/api/image/edits", model, "图生图")
         return await call.run(openai_v1_image_edit.handle, payload, quota_reservation)
 

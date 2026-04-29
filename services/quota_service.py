@@ -26,6 +26,12 @@ def settle_image_quota(
     )
 
 
+def recover_stale_image_quota_reservations(*, stale_after_seconds: int | None = None) -> int:
+    from services.user_service import user_service
+
+    return user_service.recover_stale_image_quota_reservations(stale_after_seconds=stale_after_seconds)
+
+
 def count_images(value: object) -> int:
     if isinstance(value, dict):
         count = 0

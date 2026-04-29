@@ -8,7 +8,6 @@ import time
 from typing import Any, Iterable, Iterator
 
 
-RECENT_IMAGE_GRACE_SECONDS = 60
 _image_cache_lock = RLock()
 
 
@@ -109,7 +108,6 @@ def cleanup_image_cache(
         if limits.auto_delete_enabled:
             now = time.time()
             cutoff = now - limits.retention_seconds
-            recent_cutoff = now - RECENT_IMAGE_GRACE_SECONDS
             for item in sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at):
                 resolved = _resolve_path(item.path)
                 if resolved in protected or item.modified_at >= cutoff:
@@ -122,14 +120,14 @@ def cleanup_image_cache(
                 removed_expired_files += 1
                 removed_size_bytes += item.size
 
-            files = sorted(_iter_image_cache_files(root), key=lambda file: file.modified_at)
+            files = sorted(
+                _iter_image_cache_files(root),
+                key=lambda file: (_resolve_path(file.path) in protected, file.modified_at),
+            )
             total_size = sum(item.size for item in files)
             for item in files:
                 if total_size <= limits.max_size_bytes:
                     break
-                resolved = _resolve_path(item.path)
-                if resolved in protected or item.modified_at >= recent_cutoff:
-                    continue
                 try:
                     item.path.unlink()
                 except FileNotFoundError:

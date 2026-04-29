@@ -54,6 +54,24 @@ class DatabaseStorageBackend(StorageBackend):
         """保存账号数据到数据库"""
         self._save_rows(AccountModel, accounts, "access_token")
 
+    def replace_accounts(self, accounts: list[dict[str, Any]]) -> None:
+        """显式全量替换账号数据；常规 save_accounts 保持 upsert-only 语义。"""
+        self._replace_rows(AccountModel, accounts, "access_token")
+
+    def delete_accounts(self, access_tokens: list[str]) -> None:
+        tokens = [str(token or "").strip() for token in access_tokens if str(token or "").strip()]
+        if not tokens:
+            return
+        session = self.Session()
+        try:
+            session.query(AccountModel).filter(AccountModel.access_token.in_(tokens)).delete(synchronize_session=False)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
     def _load_rows(self, model: type[AccountModel]) -> list[dict[str, Any]]:
         session = self.Session()
         try:
@@ -78,19 +96,59 @@ class DatabaseStorageBackend(StorageBackend):
     ) -> None:
         session = self.Session()
         try:
-            session.query(model).delete()
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 key_value = str(item.get(source_key) or "").strip()
                 if not key_value:
                     continue
-                session.add(
-                    model(
-                        **{target_key or source_key: key_value},
-                        data=json.dumps(item, ensure_ascii=False),
-                    )
-                )
+                key_column = target_key or source_key
+                row = session.query(model).filter(getattr(model, key_column) == key_value).one_or_none()
+                data = json.dumps(item, ensure_ascii=False)
+                if row is None:
+                    session.add(model(**{key_column: key_value}, data=data))
+                else:
+                    row.data = data
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    def _replace_rows(
+        self,
+        model: type[AccountModel],
+        items: list[dict[str, Any]],
+        source_key: str,
+        target_key: str | None = None,
+    ) -> None:
+        session = self.Session()
+        try:
+            key_column = target_key or source_key
+            cleaned_items: list[tuple[str, dict[str, Any]]] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                key_value = str(item.get(source_key) or "").strip()
+                if key_value:
+                    cleaned_items.append((key_value, item))
+
+            keys = [key for key, _item in cleaned_items]
+            query = session.query(model)
+            column = getattr(model, key_column)
+            if keys:
+                query.filter(~column.in_(keys)).delete(synchronize_session=False)
+            else:
+                query.delete(synchronize_session=False)
+
+            for key_value, item in cleaned_items:
+                row = session.query(model).filter(column == key_value).one_or_none()
+                data = json.dumps(item, ensure_ascii=False)
+                if row is None:
+                    session.add(model(**{key_column: key_value}, data=data))
+                else:
+                    row.data = data
             session.commit()
         except Exception as e:
             session.rollback()

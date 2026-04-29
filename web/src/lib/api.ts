@@ -7,7 +7,8 @@ export type AuthRole = "admin" | "user";
 
 export type Account = {
   id: string;
-  access_token: string;
+  token_ref?: string;
+  access_token?: string;
   type: AccountType;
   status: AccountStatus;
   quota: number;
@@ -30,24 +31,33 @@ type AccountListResponse = {
   items: Account[];
 };
 
+type AccountExportResponse = {
+  items: Array<{ access_token: string }>;
+};
+
 type AccountMutationResponse = {
   items: Account[];
   added?: number;
   skipped?: number;
   removed?: number;
   refreshed?: number;
-  errors?: Array<{ access_token: string; error: string }>;
+  errors?: Array<{ token_ref?: string; access_token?: string; error: string }>;
 };
 
 type AccountRefreshResponse = {
   items: Account[];
   refreshed: number;
-  errors: Array<{ access_token: string; error: string }>;
+  errors: Array<{ token_ref?: string; access_token?: string; error: string }>;
 };
 
 type AccountUpdateResponse = {
   item: Account;
   items: Account[];
+};
+
+export type AccountOperationRef = {
+  id?: string;
+  token_ref?: string | null;
 };
 
 export type SettingsConfig = {
@@ -362,6 +372,10 @@ export async function fetchAccounts() {
   return httpRequest<AccountListResponse>("/api/accounts");
 }
 
+export async function exportAccounts() {
+  return httpRequest<AccountExportResponse>("/api/accounts/export");
+}
+
 export async function createAccounts(tokens: string[]) {
   return httpRequest<AccountMutationResponse>("/api/accounts", {
     method: "POST",
@@ -369,22 +383,39 @@ export async function createAccounts(tokens: string[]) {
   });
 }
 
-export async function deleteAccounts(tokens: string[]) {
+export function getAccountOperationRefs(accounts: Account[]): AccountOperationRef[] {
+  return accounts.map((account) => ({
+    id: account.id,
+    token_ref: account.token_ref ?? "",
+  }));
+}
+
+export function buildAccountOperationPayload(refs: AccountOperationRef[]) {
+  const account_ids = Array.from(
+    new Set(refs.map((ref) => String(ref.id || "").trim()).filter(Boolean)),
+  );
+  const token_refs = Array.from(
+    new Set(refs.map((ref) => String(ref.token_ref || "").trim()).filter(Boolean)),
+  );
+  return { account_ids, token_refs };
+}
+
+export async function deleteAccounts(refs: AccountOperationRef[]) {
   return httpRequest<AccountMutationResponse>("/api/accounts", {
     method: "DELETE",
-    body: { tokens },
+    body: buildAccountOperationPayload(refs),
   });
 }
 
-export async function refreshAccounts(accessTokens: string[]) {
+export async function refreshAccounts(refs: AccountOperationRef[]) {
   return httpRequest<AccountRefreshResponse>("/api/accounts/refresh", {
     method: "POST",
-    body: { access_tokens: accessTokens },
+    body: buildAccountOperationPayload(refs),
   });
 }
 
 export async function updateAccount(
-  accessToken: string,
+  ref: AccountOperationRef,
   updates: {
     type?: AccountType;
     status?: AccountStatus;
@@ -394,7 +425,8 @@ export async function updateAccount(
   return httpRequest<AccountUpdateResponse>("/api/accounts/update", {
     method: "POST",
     body: {
-      access_token: accessToken,
+      account_id: String(ref.id || "").trim(),
+      token_ref: String(ref.token_ref || "").trim(),
       ...updates,
     },
   });

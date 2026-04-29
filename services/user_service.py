@@ -44,6 +44,13 @@ RedeemCodeType = Literal["image_quota", "concurrency", "invitation", "membership
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 JWT_ALGORITHM = "HS256"
+LOGIN_FAILURE_THRESHOLD = 5
+LOGIN_FAILURE_INITIAL_LOCK_SECONDS = 60
+LOGIN_FAILURE_MAX_LOCK_SECONDS = 900
+DEFAULT_STALE_IMAGE_QUOTA_SECONDS = 21_600
+DEFAULT_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS = 60
+_STALE_RECOVERY_STATE_LOCK = Lock()
+_LAST_STALE_RECOVERY_AT: datetime | None = None
 
 
 def utc_now() -> datetime:
@@ -125,6 +132,16 @@ class RevokedTokenModel(Base):
     token_hash = Column(String(64), primary_key=True)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class LoginFailureLimitModel(Base):
+    __tablename__ = "login_failure_limits"
+
+    email = Column(String(255), primary_key=True)
+    failed_attempts = Column(Integer, nullable=False, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
 class EmailVerificationCodeModel(Base):
@@ -301,10 +318,12 @@ class UserService:
         self._settings_lock = Lock()
         self._admin_mutation_lock = Lock()
         self._verification_lock = Lock()
+        self._login_failure_lock = Lock()
         self._secret_lock = Lock()
         self._jwt_secret_cache: str | None = None
         self._jwt_secret_path = self._configured_jwt_secret_path()
         self._ensure_defaults()
+        self._recover_stale_image_quota_reservations_throttled()
 
     @staticmethod
     def _default_database_url() -> str:
@@ -356,6 +375,63 @@ class UserService:
                 add_column("image_usage_events", name, Integer(), "NOT NULL DEFAULT 0")
             add_column("image_usage_events", "membership_source_redeem_code_id", String(36))
             add_column("image_usage_events", "membership_activation_key", String(255), "NOT NULL DEFAULT ''")
+        if "login_failure_limits" in table_names:
+            add_column("login_failure_limits", "failed_attempts", Integer(), "NOT NULL DEFAULT 0")
+            add_column("login_failure_limits", "locked_until", DateTime(timezone=True))
+            add_column("login_failure_limits", "created_at", DateTime(timezone=True))
+            add_column("login_failure_limits", "updated_at", DateTime(timezone=True))
+
+    @staticmethod
+    def _env_int(names: tuple[str, ...], default: int) -> int:
+        for name in names:
+            value = clean_string(os.getenv(name))
+            if not value:
+                continue
+            try:
+                return max(0, int(value))
+            except ValueError:
+                continue
+        return default
+
+    @classmethod
+    def stale_image_quota_seconds(cls) -> int:
+        return cls._env_int(
+            (
+                "GENAPI_STALE_IMAGE_QUOTA_SECONDS",
+                "GENAPI_STALE_IMAGE_RESERVATION_SECONDS",
+                "CHATGPT2API_STALE_IMAGE_QUOTA_SECONDS",
+                "CHATGPT2API_STALE_IMAGE_RESERVATION_SECONDS",
+            ),
+            DEFAULT_STALE_IMAGE_QUOTA_SECONDS,
+        )
+
+    @classmethod
+    def stale_image_quota_recovery_throttle_seconds(cls) -> int:
+        return cls._env_int(
+            (
+                "GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS",
+                "GENAPI_STALE_IMAGE_RESERVATION_RECOVERY_THROTTLE_SECONDS",
+                "CHATGPT2API_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS",
+                "CHATGPT2API_STALE_IMAGE_RESERVATION_RECOVERY_THROTTLE_SECONDS",
+            ),
+            DEFAULT_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS,
+        )
+
+    def _recover_stale_image_quota_reservations_throttled(self) -> int:
+        global _LAST_STALE_RECOVERY_AT
+
+        now = utc_now()
+        throttle_seconds = self.stale_image_quota_recovery_throttle_seconds()
+        with _STALE_RECOVERY_STATE_LOCK:
+            if (
+                _LAST_STALE_RECOVERY_AT is not None
+                and throttle_seconds > 0
+                and (now - _LAST_STALE_RECOVERY_AT).total_seconds() < throttle_seconds
+            ):
+                return 0
+            recovered = self.recover_stale_image_quota_reservations()
+            _LAST_STALE_RECOVERY_AT = utc_now()
+            return recovered
 
     def _read_jwt_secret_file(self) -> str:
         try:
@@ -784,16 +860,70 @@ class UserService:
     def login(self, email: str, password: str) -> dict[str, object]:
         normalized_email = normalize_email(email)
         with self.Session() as session:
+            now = utc_now()
             user = session.query(UserModel).filter(UserModel.email == normalized_email).one_or_none()
-            if user is None or not self.verify_password(user.password_hash, password):
+            if user is None:
+                raise UserServiceError("invalid email or password", status_code=401, code="invalid_credentials")
+            self._raise_if_login_limited(session, normalized_email, now)
+            if not self.verify_password(user.password_hash, password):
+                with self._login_failure_lock:
+                    self._record_login_failure(session, normalized_email, now)
+                    session.commit()
                 raise UserServiceError("invalid email or password", status_code=401, code="invalid_credentials")
             if not bool(user.enabled):
                 raise UserServiceError("user is disabled", status_code=403, code="user_disabled")
-            user.last_login_at = utc_now()
-            user.updated_at = utc_now()
-            membership = self._refresh_user_membership(session, user.id, user.updated_at)
-            session.commit()
+            with self._login_failure_lock:
+                self._clear_login_failures(session, normalized_email)
+                user.last_login_at = now
+                user.updated_at = now
+                membership = self._refresh_user_membership(session, user.id, user.updated_at)
+                session.commit()
             return {"user": self._serialize_user(user, membership), "token": self.create_token(user)}
+
+    @staticmethod
+    def _login_failure_lock_seconds(failed_attempts: int) -> int:
+        attempts_over_threshold = max(0, failed_attempts - LOGIN_FAILURE_THRESHOLD)
+        return min(
+            LOGIN_FAILURE_MAX_LOCK_SECONDS,
+            LOGIN_FAILURE_INITIAL_LOCK_SECONDS * (2 ** attempts_over_threshold),
+        )
+
+    def _raise_if_login_limited(self, session, email: str, now: datetime) -> None:
+        if not email:
+            return
+        row = session.get(LoginFailureLimitModel, email)
+        if row is None:
+            return
+        locked_until = as_utc(row.locked_until)
+        if locked_until is not None and locked_until > now:
+            retry_after = max(1, int((locked_until - now).total_seconds()))
+            raise UserServiceError(
+                f"too many login failures; retry after {retry_after} seconds",
+                status_code=429,
+                code="login_rate_limited",
+            )
+
+    def _record_login_failure(self, session, email: str, now: datetime) -> None:
+        if not email:
+            return
+        row = session.get(LoginFailureLimitModel, email)
+        if row is None:
+            row = LoginFailureLimitModel(email=email, failed_attempts=0, created_at=now)
+            session.add(row)
+        row.failed_attempts = int(row.failed_attempts or 0) + 1
+        row.locked_until = (
+            now + timedelta(seconds=self._login_failure_lock_seconds(int(row.failed_attempts or 0)))
+            if int(row.failed_attempts or 0) >= LOGIN_FAILURE_THRESHOLD
+            else None
+        )
+        row.updated_at = now
+
+    def _clear_login_failures(self, session, email: str) -> None:
+        if not email:
+            return
+        row = session.get(LoginFailureLimitModel, email)
+        if row is not None:
+            session.delete(row)
 
     def get_user(self, user_id: str) -> dict[str, object] | None:
         with self.Session() as session:
@@ -1614,6 +1744,7 @@ class UserService:
             return QuotaReservation(event_id="", user_id=clean_string(identity.get("id")), requested_count=requested_count, bypass=True)
         user_id = clean_string(identity.get("id"))
         amount = max(1, int(requested_count or 1))
+        self._recover_stale_image_quota_reservations_throttled()
         with self._quota_lock, self.Session() as session:
             now = utc_now()
             user = (
@@ -1761,6 +1892,86 @@ class UserService:
                 session.rollback()
                 return
             session.commit()
+
+    def recover_stale_image_quota_reservations(self, *, stale_after_seconds: int | None = None) -> int:
+        stale_seconds = self.stale_image_quota_seconds() if stale_after_seconds is None else int(stale_after_seconds)
+        cutoff = utc_now() - timedelta(seconds=max(0, stale_seconds))
+        recovered = 0
+        with self._quota_lock, self.Session() as session:
+            events = (
+                session.query(ImageUsageEventModel)
+                .filter(
+                    ImageUsageEventModel.status == "reserved",
+                    ImageUsageEventModel.created_at <= cutoff,
+                )
+                .order_by(ImageUsageEventModel.created_at, ImageUsageEventModel.id)
+                .all()
+            )
+            for event in events:
+                member_reserved = max(0, int(event.member_reserved_count or 0))
+                regular_reserved = max(0, int(event.regular_reserved_count or 0))
+                if member_reserved + regular_reserved <= 0:
+                    regular_reserved = max(0, int(event.requested_count or 0))
+                refund = member_reserved + regular_reserved
+                now = utc_now()
+                event_result = session.execute(
+                    update(ImageUsageEventModel)
+                    .where(
+                        ImageUsageEventModel.id == event.id,
+                        ImageUsageEventModel.status == "reserved",
+                    )
+                    .values(
+                        actual_count=0,
+                        refunded_count=refund,
+                        member_actual_count=0,
+                        regular_actual_count=0,
+                        member_refunded_count=member_reserved,
+                        regular_refunded_count=regular_reserved,
+                        status="recovered",
+                        error="recovered stale reserved image quota",
+                        settled_at=now,
+                    )
+                )
+                if event_result.rowcount != 1:
+                    continue
+
+                if member_reserved:
+                    membership = (
+                        session.query(UserMembershipModel)
+                        .filter(UserMembershipModel.user_id == event.user_id)
+                        .one_or_none()
+                    )
+                    if membership is not None:
+                        current_source = clean_string(membership.source_redeem_code_id)
+                        current_activation_key = self._membership_activation_key(membership)
+                        event_activation_key = clean_string(event.membership_activation_key)
+                        event_source = clean_string(event.membership_source_redeem_code_id)
+                        same_activation = bool(event_activation_key) and current_activation_key == event_activation_key
+                        legacy_same_source = (
+                            not event_activation_key
+                            and bool(event_source)
+                            and current_source == event_source
+                        )
+                        if same_activation or legacy_same_source:
+                            membership.member_image_quota = int(membership.member_image_quota or 0) + member_reserved
+                            membership.updated_at = now
+
+                user_result = session.execute(
+                    update(UserModel)
+                    .where(UserModel.id == event.user_id)
+                    .values(
+                        image_quota=UserModel.image_quota + regular_reserved,
+                        active_image_requests=case(
+                            (UserModel.active_image_requests > 0, UserModel.active_image_requests - 1),
+                            else_=0,
+                        ),
+                        updated_at=now,
+                    )
+                )
+                if user_result.rowcount == 1:
+                    recovered += 1
+            session.commit()
+        return recovered
 
 
 def parse_optional_datetime(value: object) -> datetime | None:

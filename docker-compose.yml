@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data
       # Web 更新中心需要宿主机 Docker Socket。启用前请阅读安全说明。
@@ -18,7 +21,7 @@ services:
       # - GENAPI_ENABLE_WEB_UPDATER=true
       # - GENAPI_UPDATE_COMPOSE_DIR=/abs/path/to/compose
       # - GENAPI_UPDATE_SERVICE=app
-      # 一键更新必填：用于更新后确认服务可用，失败时才会触发镜像回滚。
+      # 一键更新必填：用于更新后确认服务可用；不要使用 localhost/127.0.0.1。
       # - GENAPI_UPDATE_HEALTH_URL=http://host.docker.internal:3000/version
       # - GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 

@@ -9,6 +9,7 @@ web_dist
 web/.next/
 web/node_modules/
 web/out/
+.playwright-cli/
 # Virtual environments
 .venv/
 .idea

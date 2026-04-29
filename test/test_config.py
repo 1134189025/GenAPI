@@ -46,6 +46,28 @@ class ConfigLoadingTests(unittest.TestCase):
 
         self.assertNotIn("COPY config.json", dockerfile)
 
+    def test_docker_build_context_excludes_runtime_secrets(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        dockerignore = (root_dir / ".dockerignore").read_text(encoding="utf-8").splitlines()
+
+        self.assertIn("data", dockerignore)
+        self.assertIn(".env", dockerignore)
+        self.assertIn("config.json", dockerignore)
+
+    def test_default_compose_loads_env_file_for_container_runtime(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        compose = (root_dir / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("env_file:", compose)
+        self.assertIn(".env", compose)
+
+    def test_dockerfile_uses_committed_frontend_lockfile(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        dockerfile = (root_dir / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("bun install --frozen-lockfile", dockerfile)
+        self.assertNotIn("RUN npm install", dockerfile)
+
     def test_image_cache_settings_have_safe_defaults_and_are_normalized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = self.config_module.ConfigStore(Path(tmp_dir) / "config.json")
@@ -67,6 +89,15 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertEqual(updated["image_retention_days"], 1)
             self.assertEqual(updated["image_cache_max_size_mb"], 1)
             self.assertEqual(updated["image_cache_auto_delete_enabled"], False)
+
+    def test_config_update_writes_owner_read_write_only_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            store = self.config_module.ConfigStore(path)
+
+            store.update({"base_url": "https://public.example.com"})
+
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

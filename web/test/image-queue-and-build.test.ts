@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { resolveStaticRequest } from "../scripts/serve-static.mjs";
+
 const root = join(import.meta.dir, "..");
 
 function source(path: string) {
@@ -69,6 +71,14 @@ describe("image queue and build safety", () => {
     const nextConfig = source("next.config.ts");
 
     expect(nextConfig).not.toContain("ignoreBuildErrors: true");
+  });
+
+  test("serves static export output instead of using incompatible next start", () => {
+    const packageJson = JSON.parse(source("package.json")) as { scripts: Record<string, string> };
+
+    expect(packageJson.scripts.start).not.toContain("next start");
+    expect(packageJson.scripts.start).toContain("scripts/serve-static.mjs");
+    expect(typeof resolveStaticRequest).toBe("function");
   });
 
   test("keeps the image page focused on consumer creation instead of dashboard management", () => {

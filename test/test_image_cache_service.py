@@ -70,11 +70,11 @@ class ImageCacheServiceTests(unittest.TestCase):
             self.assertEqual(result["removed_oversize_files"], 2)
             self.assertLessEqual(result["total_size_bytes"], result["max_size_bytes"])
 
-    def test_cleanup_preserves_protected_new_image_even_when_over_limit(self) -> None:
+    def test_cleanup_prefers_unprotected_files_before_protected_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             old_file = write_image(root / "2026" / "04" / "28" / "old.png", 600, age_days=1)
-            new_file = write_image(root / "2026" / "04" / "29" / "new.png", 600, age_days=0)
+            new_file = write_image(root / "2026" / "04" / "29" / "new.png", 300, age_days=0)
 
             result = cleanup_image_cache(
                 root,
@@ -85,9 +85,9 @@ class ImageCacheServiceTests(unittest.TestCase):
             self.assertFalse(old_file.exists())
             self.assertTrue(new_file.exists())
             self.assertEqual(result["removed_oversize_files"], 1)
-            self.assertGreater(result["total_size_bytes"], result["max_size_bytes"])
+            self.assertLessEqual(result["total_size_bytes"], result["max_size_bytes"])
 
-    def test_cleanup_keeps_recent_images_during_size_pruning(self) -> None:
+    def test_cleanup_deletes_recent_images_when_needed_for_hard_size_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             old_file = write_image(root / "2026" / "04" / "28" / "old.png", 600, age_days=1)
@@ -99,9 +99,24 @@ class ImageCacheServiceTests(unittest.TestCase):
             )
 
             self.assertFalse(old_file.exists())
-            self.assertTrue(new_file.exists())
+            self.assertFalse(new_file.exists())
+            self.assertEqual(result["removed_oversize_files"], 2)
+            self.assertLessEqual(result["total_size_bytes"], result["max_size_bytes"])
+
+    def test_cleanup_deletes_protected_file_when_needed_for_hard_size_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            new_file = write_image(root / "2026" / "04" / "29" / "new.png", 600, age_days=0)
+
+            result = cleanup_image_cache(
+                root,
+                ImageCacheLimits(retention_days=30, max_size_mb=0.0005, auto_delete_enabled=True),
+                protected_paths={new_file},
+            )
+
+            self.assertFalse(new_file.exists())
             self.assertEqual(result["removed_oversize_files"], 1)
-            self.assertGreater(result["total_size_bytes"], result["max_size_bytes"])
+            self.assertLessEqual(result["total_size_bytes"], result["max_size_bytes"])
 
     def test_cleanup_does_not_delete_when_auto_delete_is_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -13,7 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.config import DATA_DIR
-from utils.helper import anthropic_sse_stream, sse_json_stream
+from utils.helper import anthropic_sse_stream, redact_sensitive_text, sse_json_stream
 
 LOG_TYPE_CALL = "call"
 LOG_TYPE_ACCOUNT = "account"
@@ -34,11 +34,28 @@ class LogService:
         with self.path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
 
+    def _iter_lines_reverse(self, block_size: int = 64 * 1024):
+        with self.path.open("rb") as file:
+            file.seek(0, 2)
+            position = file.tell()
+            buffer = b""
+            while position > 0:
+                read_size = min(block_size, position)
+                position -= read_size
+                file.seek(position)
+                lines = (file.read(read_size) + buffer).split(b"\n")
+                buffer = lines[0]
+                for line in reversed(lines[1:]):
+                    if line:
+                        yield line.decode("utf-8", errors="replace")
+            if buffer:
+                yield buffer.decode("utf-8", errors="replace")
+
     def list(self, type: str = "", start_date: str = "", end_date: str = "", limit: int = 200) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
         items: list[dict[str, Any]] = []
-        for line in reversed(self.path.read_text(encoding="utf-8").splitlines()):
+        for line in self._iter_lines_reverse():
             try:
                 item = json.loads(line)
             except Exception:
@@ -94,7 +111,7 @@ def _count_delivered_images(value: object) -> int:
 
 
 def _image_error_response(exc: Exception) -> JSONResponse:
-    message = str(exc)
+    message = redact_sensitive_text(str(exc))
     if "no available image quota" in message.lower():
         return JSONResponse(
             status_code=429,
@@ -107,8 +124,18 @@ def _image_error_response(exc: Exception) -> JSONResponse:
                 }
             },
         )
-    if hasattr(exc, "to_openai_error") and hasattr(exc, "status_code"):
-        return JSONResponse(status_code=int(exc.status_code), content=exc.to_openai_error())
+    if hasattr(exc, "status_code"):
+        return JSONResponse(
+            status_code=int(exc.status_code),
+            content={
+                "error": {
+                    "message": message,
+                    "type": getattr(exc, "error_type", "server_error"),
+                    "param": getattr(exc, "param", None),
+                    "code": getattr(exc, "code", "upstream_error"),
+                }
+            },
+        )
     return JSONResponse(
         status_code=502,
         content={
@@ -147,17 +174,20 @@ class LoggedCall:
         try:
             result = await run_in_threadpool(handler, *args)
         except ImageGenerationError as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc))
-            self.log("调用失败", status="failed", error=str(exc))
+            safe_error = redact_sensitive_text(str(exc))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
             return _image_error_response(exc)
         except HTTPException as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc.detail))
-            self.log("调用失败", status="failed", error=str(exc.detail))
+            safe_error = redact_sensitive_text(str(exc.detail))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
             raise
         except Exception as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc))
-            self.log("调用失败", status="failed", error=str(exc))
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            safe_error = redact_sensitive_text(str(exc))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
+            raise HTTPException(status_code=502, detail={"error": safe_error}) from exc
 
         if isinstance(result, dict):
             settle_image_quota(quota_reservation, success=True, actual_count=_count_delivered_images(result))
@@ -168,17 +198,20 @@ class LoggedCall:
         try:
             has_first, first = await run_in_threadpool(_next_item, result)
         except ImageGenerationError as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc))
-            self.log("调用失败", status="failed", error=str(exc))
+            safe_error = redact_sensitive_text(str(exc))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
             return _image_error_response(exc)
         except HTTPException as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc.detail))
-            self.log("调用失败", status="failed", error=str(exc.detail))
+            safe_error = redact_sensitive_text(str(exc.detail))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
             raise
         except Exception as exc:
-            settle_image_quota(quota_reservation, success=False, error=str(exc))
-            self.log("调用失败", status="failed", error=str(exc))
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            safe_error = redact_sensitive_text(str(exc))
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用失败", status="failed", error=safe_error)
+            raise HTTPException(status_code=502, detail={"error": safe_error}) from exc
         if not has_first:
             settle_image_quota(quota_reservation, success=True, actual_count=0)
             self.log("流式调用结束")
@@ -201,14 +234,15 @@ class LoggedCall:
                 yield item
         except Exception as exc:
             failed = True
+            safe_error = redact_sensitive_text(str(exc))
             # Failed streams that already delivered images should charge those images and refund the rest.
             settle_image_quota(
                 quota_reservation,
                 success=actual_count > 0,
                 actual_count=actual_count,
-                error=str(exc),
+                error=safe_error,
             )
-            self.log("流式调用失败", status="failed", error=str(exc), urls=urls)
+            self.log("流式调用失败", status="failed", error=safe_error, urls=urls)
             raise
         finally:
             if not failed:

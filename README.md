@@ -237,7 +237,7 @@ cp .env.example .env
 - `GENAPI_ENABLE_WEB_UPDATER`：网页更新中心开关，默认关闭。只有设置为 `true` 时才会允许从网页端发起 Docker Compose 更新。
 - `GENAPI_UPDATE_COMPOSE_DIR`：宿主机上的 Compose 项目绝对路径，目录内应包含 `docker-compose.yml`。
 - `GENAPI_UPDATE_SERVICE`：Compose 中要更新的服务名，默认建议使用 `app`。
-- `GENAPI_UPDATE_HEALTH_URL`：一键更新必填。更新后用于确认服务可用的健康检查地址，例如 `http://host.docker.internal:3000/version`。
+- `GENAPI_UPDATE_HEALTH_URL`：一键更新必填。更新后用于确认服务可用的健康检查地址，例如 `http://host.docker.internal:3000/version`。不要使用 `localhost`、`127.0.0.1` 或 `::1`，因为健康检查在 Docker helper 容器内执行，loopback 会指向 helper 自身。
 - `GITHUB_TOKEN`：可选。用于访问 GitHub Releases API，避免匿名请求限流。
 
 运行时数据：
@@ -272,7 +272,11 @@ volumes:
 
 安全警告：挂载 `/var/run/docker.sock` 后，Genapi 容器可以通过 Docker API 控制宿主机 Docker 守护进程。这通常等价于授予容器宿主机级别的管理权限。只应在可信服务器上启用，并确保管理员账号、反向代理、HTTPS、防火墙和后台访问控制都已正确配置。
 
-更新器会在 Compose 项目目录下备份 `data/`，然后执行 `docker compose pull app` 和 `docker compose up -d app`。如果 `GENAPI_UPDATE_HEALTH_URL` 健康检查失败，更新器只会尝试回滚应用镜像；数据不会自动回滚。如果需要恢复数据，必须由管理员从备份中手动恢复。
+更新前预检会确认更新开关、Compose 目录绝对路径、`docker-compose.yml`、服务名、helper 镜像、健康检查 URL、超时时间以及 Docker 运行条件。更新器会先拉取目标镜像；拉取完成后才短暂停止应用服务，备份 `data/`，再启动目标版本。这样可以避免备份期间应用继续写入本地数据，同时把停机窗口限制在备份和重启阶段。
+
+健康检查 URL 会由 bridge 网络里的 helper 容器访问，因此必须使用 helper 能访问到的地址。Docker 部署通常使用 `host.docker.internal`；`localhost`、`127.0.0.1` 和 `::1` 会在预检中被拒绝。
+
+如果备份创建失败，更新任务会写入 `failed` 状态并停止继续更新。如果 `GENAPI_UPDATE_HEALTH_URL` 健康检查失败，更新器会先停止当前失败版本，再尝试恢复更新前的数据备份并回滚到更新前镜像。若自动恢复任一步失败，任务日志和状态会提示需要管理员手动恢复。
 
 ## 手动更新与恢复
 

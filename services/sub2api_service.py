@@ -15,6 +15,8 @@ from curl_cffi.requests import Session
 
 from services.account_service import account_service
 from services.config import DATA_DIR
+from services.storage.base import atomic_write_text
+from utils.helper import redact_sensitive_text
 
 
 SUB2API_CONFIG_FILE = DATA_DIR / "sub2api_config.json"
@@ -88,11 +90,7 @@ class Sub2APIConfig:
         return []
 
     def _save(self) -> None:
-        self._store_file.parent.mkdir(parents=True, exist_ok=True)
-        self._store_file.write_text(
-            json.dumps(self._servers, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_text(self._store_file, json.dumps(self._servers, ensure_ascii=False, indent=2) + "\n")
 
     def list_servers(self) -> list[dict]:
         with self._lock:
@@ -193,7 +191,10 @@ def _login(base_url: str, email: str, password: str) -> tuple[str, float]:
             timeout=30,
         )
         if not response.ok:
-            raise RuntimeError(f"sub2api login failed: HTTP {response.status_code} {response.text[:200]}")
+            raise RuntimeError(
+                f"sub2api login failed: HTTP {response.status_code} "
+                f"{redact_sensitive_text(response.text[:200], [password])}"
+            )
         payload = response.json()
     finally:
         session.close()
@@ -466,7 +467,7 @@ class Sub2APIImportService:
         if current is None:
             return
         errors = list(current.get("errors") or [])
-        errors.append({"name": account_id, "error": message})
+        errors.append({"name": account_id, "error": redact_sensitive_text(message)})
         self._update_job(server_id, errors=errors, failed=len(errors))
 
     def _run_import(self, server_id: str, server: dict, account_ids: list[str]) -> None:
@@ -485,7 +486,7 @@ class Sub2APIImportService:
                     token, _meta = future.result()
                     tokens.append(token)
                 except Exception as exc:
-                    self._append_error(server_id, account_id, str(exc) or "unknown error")
+                    self._append_error(server_id, account_id, redact_sensitive_text(str(exc)) or "unknown error")
 
                 current = self._config.get_import_job(server_id) or {}
                 failed = len(current.get("errors") or [])

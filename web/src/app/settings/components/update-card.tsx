@@ -12,6 +12,7 @@ import {
   fetchUpdateStatus,
   startSystemUpdate,
   type UpdateJob,
+  type UpdateStatus,
   type UpdateStatusResponse,
 } from "@/lib/api";
 
@@ -38,6 +39,21 @@ function statusLabel(job: UpdateJob | null | undefined) {
   return status || "未知";
 }
 
+export function getReleaseSyncState(status: UpdateStatus | undefined) {
+  if (!status) return { label: "未检测", tone: "amber" as const };
+  if (status.error) return { label: "检查失败", tone: "amber" as const };
+  if (!status.enabled || status.mode === "manual") return { label: "未检测", tone: "amber" as const };
+  if (status.update_available) return { label: "可更新", tone: "blue" as const };
+  if (Boolean(status.latest_version) && status.update_available === false) {
+    return { label: "已同步", tone: "emerald" as const };
+  }
+  return { label: "未检测", tone: "amber" as const };
+}
+
+export function confirmSystemUpdateStart(confirm: (message: string) => boolean = window.confirm) {
+  return confirm("一键更新会拉取并重启服务，期间可能短暂不可用。确认立即开始更新？");
+}
+
 function Pill({ children, tone = "slate" }: { children: React.ReactNode; tone?: "slate" | "emerald" | "amber" | "rose" | "blue" }) {
   const toneClass = {
     amber: "border-amber-200 bg-amber-50 text-amber-800",
@@ -62,6 +78,7 @@ export function UpdateCard() {
   const status = data?.status;
   const preflight = data?.preflight;
   const canStart = Boolean(status?.enabled && status.update_available && preflight?.ok && !running && !isStarting);
+  const releaseSyncState = getReleaseSyncState(status);
 
   const recentLogs = useMemo(() => (latestJob?.logs ?? []).slice(-8), [latestJob?.logs]);
 
@@ -108,6 +125,7 @@ export function UpdateCard() {
 
   const handleStart = async () => {
     if (!canStart) return;
+    if (!confirmSystemUpdateStart()) return;
     setIsStarting(true);
     try {
       const result = await startSystemUpdate();
@@ -145,7 +163,7 @@ export function UpdateCard() {
   return (
     <DataPanel
       title="版本更新中心"
-      description="面向 Docker Compose 部署的 0.1.4 更新入口；未启用时保持手动更新模式。"
+      description="面向 Docker Compose 部署的 0.1.5 更新入口；未启用时保持手动更新模式。"
       toolbar={
         <>
           <Button
@@ -174,7 +192,7 @@ export function UpdateCard() {
             <div className="text-xs font-bold text-stone-500">最新版本</div>
             <div className="mt-2 flex items-center gap-2 text-2xl font-black text-stone-950">
               {status?.latest_version ?? "未检测"}
-              {status?.update_available ? <Pill tone="blue">可更新</Pill> : <Pill tone="emerald">已同步</Pill>}
+              <Pill tone={releaseSyncState.tone}>{releaseSyncState.label}</Pill>
             </div>
           </div>
           <div className="rounded-2xl border border-stone-200 bg-white p-4">

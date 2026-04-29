@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from services.storage.base import StorageBackend
+from services.storage.base import StorageBackend, atomic_write_text
 
 
 class JSONStorageBackend(StorageBackend):
@@ -20,17 +20,18 @@ class JSONStorageBackend(StorageBackend):
             return []
         try:
             data = json.loads(file_path.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, Exception):
-            return []
+        except OSError as exc:
+            raise ValueError(f"unable to read JSON storage file {file_path}: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"corrupt JSON storage file {file_path}: {exc}") from exc
+        if not isinstance(data, list):
+            raise ValueError(f"JSON storage file {file_path} must contain a list")
+        return data
 
     @staticmethod
     def _save_json_list(file_path: Path, items: list[dict[str, Any]]) -> None:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(
-            json.dumps(items, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        payload = json.dumps(items, ensure_ascii=False, indent=2) + "\n"
+        atomic_write_text(file_path, payload)
 
     def load_accounts(self) -> list[dict[str, Any]]:
         """从 JSON 文件加载账号数据"""

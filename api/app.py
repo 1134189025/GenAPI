@@ -3,9 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from threading import Event
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import accounts, ai, register, system, update, user_management
@@ -37,6 +37,19 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def reject_oversized_image_edit_requests(request: Request, call_next):
+        if request.url.path == "/api/image/edits":
+            content_length = request.headers.get("content-length", "").strip()
+            try:
+                request_size = int(content_length) if content_length else 0
+            except ValueError:
+                request_size = 0
+            if request_size > ai.image_edit_max_request_size_bytes():
+                return JSONResponse(status_code=413, content={"detail": {"error": "image files are too large"}})
+        return await call_next(request)
+
     app.include_router(ai.create_router())
     app.include_router(accounts.create_router())
     app.include_router(register.create_router())
@@ -86,7 +99,7 @@ def create_app() -> FastAPI:
     async def removed_legacy_auth_api(full_path: str):
         raise HTTPException(status_code=404, detail="Not Found")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def serve_web(full_path: str):
         normalized_path = full_path.strip("/")
         if normalized_path.startswith(("api/", "v1/")):

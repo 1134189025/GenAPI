@@ -7,6 +7,7 @@ from api.support import require_admin
 from services.config import DATA_DIR
 from services.update_executor import DockerUpdateExecutor
 from services.update_service import UpdateJobStore, build_release_status, load_update_settings
+from utils.helper import redact_sensitive_text
 
 
 def create_router(app_version: str) -> APIRouter:
@@ -32,8 +33,6 @@ def create_router(app_version: str) -> APIRouter:
         identity = require_admin(authorization)
         settings = load_update_settings()
         store = UpdateJobStore(DATA_DIR)
-        if store.has_active_job():
-            raise HTTPException(status_code=409, detail={"error": "an update job is already running"})
 
         status = await run_in_threadpool(
             lambda: build_release_status(current_version=app_version, settings=settings, force=True)
@@ -41,7 +40,7 @@ def create_router(app_version: str) -> APIRouter:
         if not status.get("enabled"):
             raise HTTPException(status_code=400, detail={"error": status.get("disabled_reason") or "web updater is disabled"})
         if status.get("error"):
-            raise HTTPException(status_code=502, detail={"error": status.get("error")})
+            raise HTTPException(status_code=502, detail={"error": redact_sensitive_text(str(status.get("error")))})
         if not status.get("update_available"):
             raise HTTPException(status_code=400, detail={"error": "no newer GitHub Release is available"})
 
@@ -50,12 +49,14 @@ def create_router(app_version: str) -> APIRouter:
         if not preflight.get("ok"):
             raise HTTPException(status_code=400, detail={"error": "update preflight failed", "preflight": preflight})
 
-        job = store.create(
+        job = store.create_if_idle(
             target_version=str(status.get("latest_version") or ""),
             target_tag=str(status.get("latest_tag") or ""),
             release_url=str(status.get("release_url") or ""),
             actor_id=str(identity.get("id") or identity.get("subject_id") or ""),
         )
+        if job is None:
+            raise HTTPException(status_code=409, detail={"error": "an update job is already running"})
         try:
             await run_in_threadpool(
                 lambda: executor.start(
@@ -66,8 +67,9 @@ def create_router(app_version: str) -> APIRouter:
                 )
             )
         except Exception as exc:
-            store.update(job["id"], status="failed", error=str(exc))
-            raise HTTPException(status_code=500, detail={"error": str(exc)}) from exc
+            safe_error = redact_sensitive_text(str(exc))
+            store.update(job["id"], status="failed", error=safe_error)
+            raise HTTPException(status_code=500, detail={"error": safe_error}) from exc
 
         job = store.update(job["id"], status="running")
         return {"job": job}

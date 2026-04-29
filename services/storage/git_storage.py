@@ -10,6 +10,7 @@ from git import Repo
 from git.exc import GitCommandError
 
 from services.storage.base import StorageBackend
+from utils.helper import redact_sensitive_text
 
 
 class GitStorageBackend(StorageBackend):
@@ -26,7 +27,7 @@ class GitStorageBackend(StorageBackend):
         self.repo_url = repo_url
         self.token = token
         self.branch = branch
-        self.file_path = file_path
+        self.file_path = self._validate_file_path(file_path)
         
         # 本地缓存目录
         if local_cache_dir is None:
@@ -57,6 +58,13 @@ class GitStorageBackend(StorageBackend):
         
         return repo_url
 
+    @staticmethod
+    def _validate_file_path(file_path: str) -> str:
+        path = Path(str(file_path or "").strip())
+        if not str(path) or path.is_absolute() or ".." in path.parts:
+            raise ValueError("git storage file_path must be a relative path inside the repository")
+        return path.as_posix()
+
     def _clone_or_pull(self) -> Repo:
         """克隆或拉取仓库"""
         repo_path = self.local_cache_dir / "repo"
@@ -84,17 +92,15 @@ class GitStorageBackend(StorageBackend):
         """从 Git 仓库加载账号数据"""
         try:
             return self._load_json_file(self.file_path)
-        except Exception as e:
-            print(f"[git-storage] load failed: {e}")
+        except Exception:
             raise
 
     def save_accounts(self, accounts: list[dict[str, Any]]) -> None:
         """保存账号数据到 Git 仓库"""
         try:
             self._save_json_file(self.file_path, accounts, "Update accounts data")
-        except Exception as e:
-            print(f"[git-storage] save failed: {e}")
-            raise e
+        except Exception:
+            raise
 
     def _load_json_file(self, file_path: str) -> list[dict[str, Any]]:
         data = self._load_json_value(file_path)
@@ -136,7 +142,7 @@ class GitStorageBackend(StorageBackend):
             return {
                 "status": "unhealthy",
                 "backend": "git",
-                "error": str(e),
+                "error": redact_sensitive_text(str(e)),
             }
 
     def get_backend_info(self) -> dict[str, Any]:

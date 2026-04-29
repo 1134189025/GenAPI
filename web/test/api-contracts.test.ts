@@ -1,31 +1,51 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-const root = join(import.meta.dir, "..");
+const httpRequest = mock(async (path: string) => {
+  if (path === "/api/settings") {
+    return { config: { proxy: "http://proxy.local:8080" } };
+  }
+  return {};
+});
 
-function source(path: string) {
-  return readFileSync(join(root, path), "utf8");
-}
+mock.module("../src/lib/request", () => ({ httpRequest }));
+mock.module("@/lib/request", () => ({ httpRequest }));
+
+const api = await import("../src/lib/api");
+
+beforeEach(() => {
+  httpRequest.mockClear();
+});
 
 describe("frontend backend API contracts", () => {
-  test("does not call the removed standalone proxy settings endpoints", () => {
-    const api = source("src/lib/api.ts");
+  test("does not call the removed standalone proxy settings endpoints", async () => {
+    await api.fetchProxy();
+    await api.updateProxy({ enabled: true, url: " http://next-proxy.local:8080 " });
+    await api.testProxy("http://probe-proxy.local:8080");
 
-    expect(api).not.toContain('"/api/proxy"');
-    expect(api).toContain('"/api/proxy/test"');
+    expect(httpRequest.mock.calls.map((call) => call[0])).toEqual([
+      "/api/settings",
+      "/api/settings",
+      "/api/settings",
+      "/api/proxy/test",
+    ]);
+    expect(httpRequest.mock.calls.some((call) => call[0] === "/api/proxy")).toBe(false);
+    expect(httpRequest.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+      body: { proxy: "http://next-proxy.local:8080" },
+    });
   });
 
-  test("exposes admin update center API contracts", () => {
-    const api = source("src/lib/api.ts");
+  test("exposes admin update center API contracts", async () => {
+    await api.fetchUpdateStatus();
+    await api.fetchUpdateStatus(true);
+    await api.startSystemUpdate();
+    await api.fetchUpdateJob("job-a");
 
-    expect(api).toContain("UpdateStatus");
-    expect(api).toContain("UpdateJob");
-    expect(api).toContain("fetchUpdateStatus");
-    expect(api).toContain("startSystemUpdate");
-    expect(api).toContain("fetchUpdateJob");
-    expect(api).toContain('"/api/admin/update/status"');
-    expect(api).toContain('"/api/admin/update/start"');
-    expect(api).toContain('`/api/admin/update/jobs/${jobId}`');
+    expect(httpRequest.mock.calls).toEqual([
+      ["/api/admin/update/status"],
+      ["/api/admin/update/status?force=true"],
+      ["/api/admin/update/start", { method: "POST" }],
+      ["/api/admin/update/jobs/job-a"],
+    ]);
   });
 });

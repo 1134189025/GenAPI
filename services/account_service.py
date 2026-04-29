@@ -17,7 +17,7 @@ from services.log_service import (
 )
 from services.proxy_service import proxy_settings
 from services.storage.base import StorageBackend
-from utils.helper import anonymize_token
+from utils.helper import anonymize_token, redact_sensitive_text
 
 
 class AccountService:
@@ -54,10 +54,42 @@ class AccountService:
         return cleaned
 
     def _find_account_index(self, access_token: str) -> int:
+        access_token = self._clean_token(access_token)
         for index, item in enumerate(self._accounts):
             if self._clean_token(item.get("access_token")) == access_token:
                 return index
+        for index, item in enumerate(self._accounts):
+            token = self._clean_token(item.get("access_token"))
+            if token and (self._token_id(token) == access_token or anonymize_token(token) == access_token):
+                return index
         return -1
+
+    @staticmethod
+    def _token_id(access_token: str) -> str:
+        return hashlib.sha1(access_token.encode("utf-8")).hexdigest()[:16]
+
+    def _resolve_token_identifier_locked(self, identifier: str) -> str:
+        identifier = self._clean_token(identifier)
+        if not identifier:
+            return ""
+        index = self._find_account_index(identifier)
+        if index >= 0:
+            return self._clean_token(self._accounts[index].get("access_token"))
+        return identifier
+
+    def resolve_access_tokens(self, identifiers: list[str]) -> list[str]:
+        cleaned = self._clean_tokens(identifiers)
+        if not cleaned:
+            return []
+        with self._lock:
+            resolved: list[str] = []
+            seen = set()
+            for identifier in cleaned:
+                token = self._resolve_token_identifier_locked(identifier)
+                if token and token not in seen:
+                    seen.add(token)
+                    resolved.append(token)
+            return resolved
 
     @staticmethod
     def _is_image_account_available(account: dict) -> bool:
@@ -167,6 +199,19 @@ class AccountService:
     def _save_accounts(self) -> None:
         self.storage.save_accounts(self._accounts)
 
+    def _reload_accounts_locked(self) -> None:
+        self._accounts = self._load_accounts()
+        if self._accounts:
+            self._index %= len(self._accounts)
+        else:
+            self._index = 0
+
+    def _delete_persisted_accounts(self, access_tokens: list[str]) -> None:
+        try:
+            self.storage.delete_accounts(access_tokens)
+        except NotImplementedError:
+            self._save_accounts()
+
     def _build_remote_headers(self, access_token: str) -> tuple[dict[str, str], str]:
         account = self.get_account(access_token) or {}
         user_agent = self._clean_token(account.get("user-agent") or account.get("user_agent"))
@@ -201,8 +246,9 @@ class AccountService:
     def _public_items(self, accounts: list[dict]) -> list[dict]:
         return [
             {
-                "id": hashlib.sha1(access_token.encode("utf-8")).hexdigest()[:16],
-                "access_token": access_token,
+                "id": self._token_id(access_token),
+                "access_token": anonymize_token(access_token),
+                "token_ref": anonymize_token(access_token),
                 "type": account.get("type") or "Free",
                 "status": account.get("status") or "正常",
                 "quota": account.get("quota") if account.get("quota") is not None else 0,
@@ -248,7 +294,7 @@ class AccountService:
         try:
             remote_info = self.fetch_remote_info(access_token)
         except Exception as exc:
-            message = str(exc)
+            message = redact_sensitive_text(str(exc), [access_token])
             print(f"[account-available] refresh token={token_ref} fail {message}")
             if "/backend-api/me failed: HTTP 401" in message:
                 if self.remove_invalid_token(access_token, "refresh_account_state"):
@@ -315,6 +361,41 @@ class AccountService:
         with self._lock:
             return self._public_items(self._accounts)
 
+    def public_account(self, account: dict) -> dict | None:
+        items = self._public_items([account])
+        return items[0] if items else None
+
+    def export_accounts(
+        self,
+        actor: dict[str, object] | None = None,
+        *,
+        request_ip: str = "",
+        user_agent: str = "",
+    ) -> list[dict]:
+        with self._lock:
+            items = [dict(account) for account in self._accounts]
+            payload: dict[str, object] = {"count": len(items)}
+            payload["token_refs"] = [
+                anonymize_token(account.get("access_token"))
+                for account in items
+                if self._clean_token(account.get("access_token"))
+            ]
+            if request_ip:
+                payload["request_ip"] = request_ip
+            if user_agent:
+                payload["user_agent"] = user_agent
+            if actor:
+                payload.update(
+                    {
+                        "actor_id": self._clean_token(actor.get("id")),
+                        "actor_email": self._clean_token(actor.get("email")),
+                        "actor_name": self._clean_token(actor.get("name")),
+                        "actor_role": self._clean_token(actor.get("role")),
+                    }
+                )
+            log_service.add(LOG_TYPE_ACCOUNT, "导出账号", payload)
+            return items
+
     def list_limited_tokens(self) -> list[str]:
         with self._lock:
             return [
@@ -330,6 +411,7 @@ class AccountService:
             return {"added": 0, "skipped": 0, "items": self.list_accounts()}
 
         with self._lock:
+            self._reload_accounts_locked()
             indexed = {self._clean_token(item.get("access_token")): dict(item) for item in self._accounts}
             added = 0
             skipped = 0
@@ -356,10 +438,13 @@ class AccountService:
         return {"added": added, "skipped": skipped, "items": items}
 
     def delete_accounts(self, tokens: list[str]) -> dict:
-        target_set = set(self._clean_tokens(tokens))
+        requested_tokens = self._clean_tokens(tokens)
+        target_set = set(requested_tokens)
         if not target_set:
             return {"removed": 0, "items": self.list_accounts()}
         with self._lock:
+            target_set = {self._resolve_token_identifier_locked(token) for token in requested_tokens}
+            target_set = {token for token in target_set if token}
             before = len(self._accounts)
             self._accounts = [item for item in self._accounts if
                               self._clean_token(item.get("access_token")) not in target_set]
@@ -369,7 +454,7 @@ class AccountService:
             else:
                 self._index = 0
             if removed:
-                self._save_accounts()
+                self._delete_persisted_accounts(list(target_set))
                 log_service.add(LOG_TYPE_ACCOUNT, f"删除 {removed} 个账号", {"removed": removed})
             items = self._public_items(self._accounts)
         return {"removed": removed, "items": items}
@@ -382,15 +467,18 @@ class AccountService:
         if not access_token:
             return None
         with self._lock:
+            self._reload_accounts_locked()
             index = self._find_account_index(access_token)
             if index < 0:
                 return None
-            account = self._normalize_account({**self._accounts[index], **updates, "access_token": access_token})
+            stored_token = self._clean_token(self._accounts[index].get("access_token"))
+            account = self._normalize_account({**self._accounts[index], **updates, "access_token": stored_token})
             if account is None:
                 return None
+            access_token = self._clean_token(account.get("access_token"))
             if account.get("status") == "限流" and config.auto_remove_rate_limited_accounts:
                 del self._accounts[index]
-                self._save_accounts()
+                self._delete_persisted_accounts([access_token])
                 log_service.add(LOG_TYPE_ACCOUNT, "自动移除限流账号", {"token": anonymize_token(access_token)})
                 return None
             self._accounts[index] = account
@@ -404,6 +492,7 @@ class AccountService:
         if not access_token:
             return None
         with self._lock:
+            self._reload_accounts_locked()
             index = self._find_account_index(access_token)
             if index < 0:
                 return None
@@ -426,7 +515,7 @@ class AccountService:
                 return None
             if account.get("status") == "限流" and config.auto_remove_rate_limited_accounts:
                 del self._accounts[index]
-                self._save_accounts()
+                self._delete_persisted_accounts([access_token])
                 log_service.add(LOG_TYPE_ACCOUNT, "自动移除限流账号", {"token": anonymize_token(access_token)})
                 return None
             self._accounts[index] = account
@@ -508,7 +597,7 @@ class AccountService:
             session.close()
 
     def refresh_accounts(self, access_tokens: list[str]) -> dict[str, Any]:
-        cleaned_tokens = self._clean_tokens(access_tokens)
+        cleaned_tokens = self.resolve_access_tokens(access_tokens)
         if not cleaned_tokens:
             return {"refreshed": 0, "errors": [], "items": self.list_accounts()}
 
@@ -526,13 +615,13 @@ class AccountService:
                     if self.update_account(access_token, remote_info) is not None:
                         refreshed += 1
                 except Exception as exc:
-                    message = str(exc)
+                    message = redact_sensitive_text(str(exc), [access_token])
                     print(f"[account-refresh] fail {anonymize_token(access_token)} {message}")
                     if "/backend-api/me failed: HTTP 401" in message:
                         if not self.remove_invalid_token(access_token, "refresh_accounts"):
                             self.update_account(access_token, {"status": "异常", "quota": 0})
                         message = "检测到封号"
-                    errors.append({"access_token": access_token, "error": message})
+                    errors.append({"access_token": anonymize_token(access_token), "token_ref": anonymize_token(access_token), "error": message})
 
         print(f"[account-refresh] done refreshed={refreshed} errors={len(errors)} workers={max_workers}")
         return {

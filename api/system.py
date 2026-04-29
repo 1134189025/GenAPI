@@ -53,7 +53,13 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/api/logs")
     async def get_logs(type: str = "", start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": log_service.list(type=type.strip(), start_date=start_date.strip(), end_date=end_date.strip())}
+        items = await run_in_threadpool(
+            log_service.list,
+            type=type.strip(),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+        )
+        return {"items": items}
 
     @router.post("/api/proxy/test")
     async def test_proxy_endpoint(body: ProxyTestRequest, authorization: str | None = Header(default=None)):

@@ -186,6 +186,33 @@ class SettingsImageCacheAPITests(unittest.TestCase):
         self.assertIn("list_images", threads)
         self.assertNotEqual(threads["route"], threads["list_images"])
 
+    def test_logs_listing_runs_outside_route_thread(self) -> None:
+        system_module = sys.modules["api.system"]
+        original_require_admin = system_module.require_admin
+        threads: dict[str, int] = {}
+
+        def tracked_require_admin(authorization):
+            threads["route"] = threading.get_ident()
+            return original_require_admin(authorization)
+
+        def tracked_list_logs(type="", start_date="", end_date=""):
+            threads["list_logs"] = threading.get_ident()
+            return []
+
+        system_module.require_admin = tracked_require_admin
+        original_list_logs = system_module.log_service.list
+        system_module.log_service.list = tracked_list_logs
+        try:
+            response = self.client.get("/api/logs", headers=self.headers)
+        finally:
+            system_module.require_admin = original_require_admin
+            system_module.log_service.list = original_list_logs
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("route", threads)
+        self.assertIn("list_logs", threads)
+        self.assertNotEqual(threads["route"], threads["list_logs"])
+
 
 if __name__ == "__main__":
     unittest.main()

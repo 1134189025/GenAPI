@@ -4,9 +4,10 @@
 
 用法：
   python scripts/migrate_storage.py --from json --to postgres
+  python scripts/migrate_storage.py --from json --to postgres --replace
   python scripts/migrate_storage.py --from postgres --to git
   python scripts/migrate_storage.py --export accounts.json
-  python scripts/migrate_storage.py --import accounts.json
+  python scripts/migrate_storage.py --import accounts.json --replace
 """
 
 import argparse
@@ -21,6 +22,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 from services.storage.factory import create_storage_backend
+from services.storage.base import atomic_write_text
+
+
+def _merge_accounts(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for item in [*existing, *incoming]:
+        if not isinstance(item, dict):
+            continue
+        token = str(item.get("access_token") or "").strip()
+        if not token:
+            continue
+        if token not in merged:
+            order.append(token)
+        merged[token] = item
+    return [merged[token] for token in order]
+
+
+def _save_or_merge_accounts(storage, accounts: list[dict], *, replace: bool) -> None:
+    if replace:
+        storage.replace_accounts(accounts)
+        return
+    storage.save_accounts(_merge_accounts(storage.load_accounts(), accounts))
 
 
 def export_to_json(output_file: str):
@@ -31,16 +55,12 @@ def export_to_json(output_file: str):
     accounts = storage.load_accounts()
     
     output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(accounts, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(output_path, json.dumps(accounts, ensure_ascii=False, indent=2) + "\n")
     
     print(f"[migrate] Exported {len(accounts)} accounts to {output_file}")
 
 
-def import_from_json(input_file: str):
+def import_from_json(input_file: str, *, replace: bool = False):
     """从 JSON 文件导入数据到当前存储后端"""
     print(f"[migrate] Importing data from {input_file}")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,12 +79,13 @@ def import_from_json(input_file: str):
         sys.exit(1)
     
     storage = create_storage_backend(DATA_DIR)
-    storage.save_accounts(accounts)
+    _save_or_merge_accounts(storage, accounts, replace=replace)
     
-    print(f"[migrate] Imported {len(accounts)} accounts")
+    mode = "replaced" if replace else "imported"
+    print(f"[migrate] {mode.capitalize()} {len(accounts)} accounts")
 
 
-def migrate_data(from_backend: str, to_backend: str):
+def migrate_data(from_backend: str, to_backend: str, *, replace: bool = False):
     """从一个存储后端迁移到另一个"""
     print(f"[migrate] Migrating from {from_backend} to {to_backend}")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,8 +102,12 @@ def migrate_data(from_backend: str, to_backend: str):
         # 写入目标后端
         os.environ["STORAGE_BACKEND"] = to_backend
         to_storage = create_storage_backend(DATA_DIR)
-        to_storage.save_accounts(accounts)
-        print(f"[migrate] Saved {len(accounts)} accounts to {to_backend}")
+        if replace:
+            to_storage.replace_accounts(accounts)
+            print(f"[migrate] Replaced target data with {len(accounts)} accounts in {to_backend}")
+        else:
+            _save_or_merge_accounts(to_storage, accounts, replace=False)
+            print(f"[migrate] Saved {len(accounts)} accounts to {to_backend}")
         
         print(f"[migrate] Migration completed successfully!")
         
@@ -102,6 +127,7 @@ def main():
 示例:
   # 从 JSON 迁移到 PostgreSQL
   python scripts/migrate_storage.py --from json --to postgres
+  python scripts/migrate_storage.py --from json --to postgres --replace
   
   # 从 PostgreSQL 迁移到 Git
   python scripts/migrate_storage.py --from postgres --to git
@@ -111,6 +137,7 @@ def main():
   
   # 从 JSON 文件导入数据
   python scripts/migrate_storage.py --import backup.json
+  python scripts/migrate_storage.py --import backup.json --replace
 
 环境变量:
   STORAGE_BACKEND  - 存储后端类型 (json, sqlite, postgres, git)
@@ -144,16 +171,24 @@ def main():
         metavar="FILE",
         help="从 JSON 文件导入数据",
     )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="显式替换目标账号数据；默认使用后端 upsert 语义，不删除目标端额外账号",
+    )
     
     args = parser.parse_args()
     
     # 检查参数
     if args.from_backend and args.to_backend:
-        migrate_data(args.from_backend, args.to_backend)
+        migrate_data(args.from_backend, args.to_backend, replace=args.replace)
     elif args.export_file:
+        if args.replace:
+            print("[migrate] Error: --replace cannot be used with --export")
+            sys.exit(1)
         export_to_json(args.export_file)
     elif args.import_file:
-        import_from_json(args.import_file)
+        import_from_json(args.import_file, replace=args.replace)
     else:
         parser.print_help()
         sys.exit(1)

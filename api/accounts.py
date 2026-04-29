@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.support import (
@@ -19,6 +20,7 @@ from services.sub2api_service import (
     sub2api_config,
     sub2api_import_service,
 )
+from utils.helper import redact_sensitive_text
 
 
 
@@ -28,14 +30,20 @@ class AccountCreateRequest(BaseModel):
 
 class AccountDeleteRequest(BaseModel):
     tokens: list[str] = Field(default_factory=list)
+    account_ids: list[str] = Field(default_factory=list)
+    token_refs: list[str] = Field(default_factory=list)
 
 
 class AccountRefreshRequest(BaseModel):
     access_tokens: list[str] = Field(default_factory=list)
+    account_ids: list[str] = Field(default_factory=list)
+    token_refs: list[str] = Field(default_factory=list)
 
 
 class AccountUpdateRequest(BaseModel):
     access_token: str = ""
+    account_id: str = ""
+    token_ref: str = ""
     type: str | None = None
     status: str | None = None
     quota: int | None = None
@@ -79,13 +87,44 @@ class Sub2APIImportRequest(BaseModel):
     account_ids: list[str] = Field(default_factory=list)
 
 
+def _account_identifiers(*values: list[str]) -> list[str]:
+    identifiers: list[str] = []
+    seen: set[str] = set()
+    for items in values:
+        for item in items:
+            value = str(item or "").strip()
+            if value and value not in seen:
+                seen.add(value)
+                identifiers.append(value)
+    return identifiers
+
+
 def create_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/accounts")
     async def get_accounts(authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": account_service.list_accounts()}
+        return {"items": await run_in_threadpool(account_service.list_accounts)}
+
+    @router.get("/api/accounts/export")
+    async def export_accounts(request: Request, authorization: str | None = Header(default=None)):
+        identity = require_admin(authorization)
+        request_ip = request.client.host if request.client is not None else ""
+        user_agent = str(request.headers.get("user-agent") or "").strip()
+        items = await run_in_threadpool(
+            account_service.export_accounts,
+            actor=identity,
+            request_ip=request_ip,
+            user_agent=user_agent,
+        )
+        return JSONResponse(
+            {"items": items},
+            headers={
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+            },
+        )
 
     @router.post("/api/accounts")
     async def create_accounts(body: AccountCreateRequest, authorization: str | None = Header(default=None)):
@@ -93,8 +132,8 @@ def create_router() -> APIRouter:
         tokens = [str(token or "").strip() for token in body.tokens if str(token or "").strip()]
         if not tokens:
             raise HTTPException(status_code=400, detail={"error": "tokens is required"})
-        result = account_service.add_accounts(tokens)
-        refresh_result = account_service.refresh_accounts(tokens)
+        result = await run_in_threadpool(account_service.add_accounts, tokens)
+        refresh_result = await run_in_threadpool(account_service.refresh_accounts, tokens)
         return {
             **result,
             "refreshed": refresh_result.get("refreshed", 0),
@@ -105,34 +144,37 @@ def create_router() -> APIRouter:
     @router.delete("/api/accounts")
     async def delete_accounts(body: AccountDeleteRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        tokens = [str(token or "").strip() for token in body.tokens if str(token or "").strip()]
-        if not tokens:
-            raise HTTPException(status_code=400, detail={"error": "tokens is required"})
-        return account_service.delete_accounts(tokens)
+        identifiers = _account_identifiers(body.account_ids, body.token_refs, body.tokens)
+        if not identifiers:
+            raise HTTPException(status_code=400, detail={"error": "account_ids, token_refs, or tokens is required"})
+        return await run_in_threadpool(account_service.delete_accounts, identifiers)
 
     @router.post("/api/accounts/refresh")
     async def refresh_accounts(body: AccountRefreshRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        access_tokens = [str(token or "").strip() for token in body.access_tokens if str(token or "").strip()]
-        if not access_tokens:
-            access_tokens = account_service.list_tokens()
-        if not access_tokens:
-            raise HTTPException(status_code=400, detail={"error": "access_tokens is required"})
-        return account_service.refresh_accounts(access_tokens)
+        identifiers = _account_identifiers(body.account_ids, body.token_refs, body.access_tokens)
+        if not identifiers:
+            identifiers = await run_in_threadpool(account_service.list_tokens)
+        if not identifiers:
+            raise HTTPException(status_code=400, detail={"error": "account_ids, token_refs, or access_tokens is required"})
+        return await run_in_threadpool(account_service.refresh_accounts, identifiers)
 
     @router.post("/api/accounts/update")
     async def update_account(body: AccountUpdateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        access_token = str(body.access_token or "").strip()
-        if not access_token:
-            raise HTTPException(status_code=400, detail={"error": "access_token is required"})
+        identifiers = _account_identifiers([body.account_id], [body.token_ref], [body.access_token])
+        if not identifiers:
+            raise HTTPException(status_code=400, detail={"error": "account_id, token_ref, or access_token is required"})
         updates = {key: value for key, value in {"type": body.type, "status": body.status, "quota": body.quota}.items() if value is not None}
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "no updates provided"})
-        account = account_service.update_account(access_token, updates)
+        account = await run_in_threadpool(account_service.update_account, identifiers[0], updates)
         if account is None:
             raise HTTPException(status_code=404, detail={"error": "account not found"})
-        return {"item": account, "items": account_service.list_accounts()}
+        return {
+            "item": account_service.public_account(account),
+            "items": await run_in_threadpool(account_service.list_accounts),
+        }
 
     @router.get("/api/cpa/pools")
     async def list_cpa_pools(authorization: str | None = Header(default=None)):
@@ -170,7 +212,15 @@ def create_router() -> APIRouter:
         pool = cpa_config.get_pool(pool_id)
         if pool is None:
             raise HTTPException(status_code=404, detail={"error": "pool not found"})
-        return {"pool_id": pool_id, "files": await run_in_threadpool(list_remote_files, pool)}
+        try:
+            files = await run_in_threadpool(list_remote_files, pool)
+        except Exception as exc:
+            secret_key = str(pool.get("secret_key") or "").strip()
+            raise HTTPException(
+                status_code=502,
+                detail={"error": redact_sensitive_text(str(exc), [secret_key] if secret_key else [])},
+            ) from exc
+        return {"pool_id": pool_id, "files": files}
 
     @router.post("/api/cpa/pools/{pool_id}/import")
     async def cpa_pool_import(pool_id: str, body: CPAImportRequest, authorization: str | None = Header(default=None)):
@@ -181,7 +231,7 @@ def create_router() -> APIRouter:
         try:
             job = cpa_import_service.start_import(pool, body.names)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=400, detail={"error": redact_sensitive_text(str(exc))}) from exc
         return {"import_job": job}
 
     @router.get("/api/cpa/pools/{pool_id}/import")
@@ -240,7 +290,7 @@ def create_router() -> APIRouter:
         try:
             groups = await run_in_threadpool(sub2api_list_remote_groups, server)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=502, detail={"error": redact_sensitive_text(str(exc))}) from exc
         return {"server_id": server_id, "groups": groups}
 
     @router.get("/api/sub2api/servers/{server_id}/accounts")
@@ -252,7 +302,7 @@ def create_router() -> APIRouter:
         try:
             accounts = await run_in_threadpool(sub2api_list_remote_accounts, server)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=502, detail={"error": redact_sensitive_text(str(exc))}) from exc
         return {"server_id": server_id, "accounts": accounts}
 
     @router.post("/api/sub2api/servers/{server_id}/import")
@@ -264,7 +314,7 @@ def create_router() -> APIRouter:
         try:
             job = sub2api_import_service.start_import(server, body.account_ids)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=400, detail={"error": redact_sensitive_text(str(exc))}) from exc
         return {"import_job": job}
 
     @router.get("/api/sub2api/servers/{server_id}/import")

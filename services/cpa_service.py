@@ -15,6 +15,8 @@ from curl_cffi.requests import Session
 from services.account_service import account_service
 from services.config import DATA_DIR
 from services.proxy_service import proxy_settings
+from services.storage.base import atomic_write_text
+from utils.helper import redact_sensitive_text
 
 
 CPA_CONFIG_FILE = DATA_DIR / "cpa_config.json"
@@ -87,8 +89,7 @@ class CPAConfig:
         return []
 
     def _save(self) -> None:
-        self._store_file.parent.mkdir(parents=True, exist_ok=True)
-        self._store_file.write_text(json.dumps(self._pools, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(self._store_file, json.dumps(self._pools, ensure_ascii=False, indent=2) + "\n")
 
     def list_pools(self) -> list[dict]:
         with self._lock:
@@ -196,7 +197,7 @@ def fetch_remote_access_token(pool: dict, file_name: str) -> tuple[str | None, s
             return None, f"HTTP {response.status_code}"
         payload = response.json()
     except Exception as exc:
-        return None, str(exc)
+        return None, redact_sensitive_text(str(exc), [secret_key])
     finally:
         session.close()
 
@@ -261,7 +262,7 @@ class CPAImportService:
         if current is None:
             return
         errors = list(current.get("errors") or [])
-        errors.append({"name": file_name, "error": message})
+        errors.append({"name": file_name, "error": redact_sensitive_text(message)})
         self._update_job(pool_id, errors=errors, failed=len(errors))
 
     def _run_import(self, pool_id: str, pool: dict, names: list[str]) -> None:
@@ -276,7 +277,7 @@ class CPAImportService:
                 try:
                     token, error = future.result()
                 except Exception as exc:
-                    token, error = None, str(exc)
+                    token, error = None, redact_sensitive_text(str(exc))
 
                 if token:
                     tokens.append(token)

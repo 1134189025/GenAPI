@@ -44,20 +44,21 @@ type PendingCpaImport = {
 
 const sessionUrl = "https://chatgpt.com/api/auth/session";
 
-function splitTokens(value: string) {
+export function splitTokens(value: string) {
   return value
     .split(/\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function getSessionAccessToken(value: unknown) {
+export function getSessionAccessToken(value: unknown) {
   const token = (value as { accessToken?: unknown })?.accessToken;
   return typeof token === "string" ? token.trim() : "";
 }
 
-function getCpaAccessToken(value: unknown) {
-  const token = (value as { access_token?: unknown })?.access_token;
+export function getCpaAccessToken(value: unknown) {
+  const payload = value as { access_token?: unknown; accessToken?: unknown };
+  const token = payload.access_token ?? payload.accessToken;
   return typeof token === "string" ? token.trim() : "";
 }
 
@@ -242,7 +243,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
       const errorCount = results.length - parsedFileCount;
 
       if (parsedFileCount === 0) {
-        toast.error("这些 CPA JSON 文件里没有读取到可用 access_token");
+        toast.error("这些 CPA JSON 文件里没有读取到可用 access_token 或 accessToken");
         return;
       }
 

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from services.storage.base import StorageBackend
+from services.storage.base import atomic_write_text
 from services.image_cache_service import ImageCacheLimits, cleanup_image_cache, get_image_cache_status
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -79,8 +80,7 @@ class ConfigStore:
         return _read_effective_config(self.path)
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(self.path, json.dumps(self.data, ensure_ascii=False, indent=2) + "\n")
 
     @property
     def accounts_file(self) -> Path:

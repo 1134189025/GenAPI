@@ -80,6 +80,49 @@ function normalizeAccounts(items: Sub2APIRemoteAccount[]) {
   return accounts;
 }
 
+export function isSub2APIAuthModeChanged(server: Sub2APIServer, nextMode: AuthMode) {
+  return (server.has_api_key ? "api_key" : "password") !== nextMode;
+}
+
+export function validateSub2APIServerForm({
+  editingServer,
+  baseUrl,
+  email,
+  password,
+  apiKey,
+  authMode,
+}: {
+  editingServer: Sub2APIServer | null;
+  baseUrl: string;
+  email: string;
+  password: string;
+  apiKey: string;
+  authMode: AuthMode;
+}) {
+  if (!baseUrl.trim()) {
+    return "请输入 Sub2API 地址";
+  }
+  if (authMode === "password") {
+    if (!email.trim()) {
+      return "请输入管理员邮箱";
+    }
+    if (!editingServer && !password.trim()) {
+      return "请输入管理员密码";
+    }
+    if (editingServer && isSub2APIAuthModeChanged(editingServer, authMode) && !password.trim()) {
+      return "切换认证方式后请输入管理员密码";
+    }
+    return "";
+  }
+  if (!editingServer && !apiKey.trim()) {
+    return "请输入 Admin API Key";
+  }
+  if (editingServer && isSub2APIAuthModeChanged(editingServer, authMode) && !apiKey.trim()) {
+    return "切换认证方式后请输入 Admin API Key";
+  }
+  return "";
+}
+
 export function Sub2APIConnections() {
   const didLoadRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -218,21 +261,16 @@ export function Sub2APIConnections() {
   };
 
   const handleSave = async () => {
-    if (!formBaseUrl.trim()) {
-      toast.error("请输入 Sub2API 地址");
-      return;
-    }
-    if (authMode === "password") {
-      if (!formEmail.trim()) {
-        toast.error("请输入管理员邮箱");
-        return;
-      }
-      if (!editingServer && !formPassword.trim()) {
-        toast.error("请输入管理员密码");
-        return;
-      }
-    } else if (!editingServer && !formApiKey.trim()) {
-      toast.error("请输入 Admin API Key");
+    const validationError = validateSub2APIServerForm({
+      editingServer,
+      baseUrl: formBaseUrl,
+      email: formEmail,
+      password: formPassword,
+      apiKey: formApiKey,
+      authMode,
+    });
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 

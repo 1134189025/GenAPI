@@ -4,8 +4,10 @@ import importlib
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 from threading import Barrier, local
 from unittest.mock import patch
@@ -20,8 +22,12 @@ class UserManagementAPITests(unittest.TestCase):
         self.old_user_db = os.environ.get("GENAPI_USER_DATABASE_URL")
         self.old_jwt_secret = os.environ.get("JWT_SECRET")
         self.old_jwt_secret_file = os.environ.get("GENAPI_JWT_SECRET_FILE")
+        self.old_stale_seconds = os.environ.get("GENAPI_STALE_IMAGE_QUOTA_SECONDS")
+        self.old_stale_throttle = os.environ.get("GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS")
         os.environ["GENAPI_USER_DATABASE_URL"] = f"sqlite:///{db_path}"
         os.environ.pop("GENAPI_JWT_SECRET_FILE", None)
+        os.environ.pop("GENAPI_STALE_IMAGE_QUOTA_SECONDS", None)
+        os.environ.pop("GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS", None)
 
         self.reload_app(jwt_secret="unit-test-secret-with-at-least-32-bytes")
 
@@ -73,6 +79,14 @@ class UserManagementAPITests(unittest.TestCase):
             os.environ.pop("GENAPI_JWT_SECRET_FILE", None)
         else:
             os.environ["GENAPI_JWT_SECRET_FILE"] = self.old_jwt_secret_file
+        if self.old_stale_seconds is None:
+            os.environ.pop("GENAPI_STALE_IMAGE_QUOTA_SECONDS", None)
+        else:
+            os.environ["GENAPI_STALE_IMAGE_QUOTA_SECONDS"] = self.old_stale_seconds
+        if self.old_stale_throttle is None:
+            os.environ.pop("GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS", None)
+        else:
+            os.environ["GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS"] = self.old_stale_throttle
         self.tmp.cleanup()
 
     def create_admin(self) -> str:
@@ -136,6 +150,151 @@ class UserManagementAPITests(unittest.TestCase):
         self.assertEqual(me.status_code, 200, me.text)
         self.assertEqual(me.json()["user"]["email"], "admin@example.com")
         self.assertEqual(me.json()["user"]["role"], "admin")
+
+    def test_login_failures_lock_email_with_exponential_backoff_and_success_clears(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "locked@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        service_module = importlib.import_module("services.user_service")
+        current = service_module.utc_now()
+
+        def now():
+            return current
+
+        with patch("services.user_service.utc_now", side_effect=now):
+            for _ in range(5):
+                failed = self.client.post(
+                    "/api/auth/login",
+                    json={"email": "Locked@Example.com", "password": "wrong-pass"},
+                )
+                self.assertEqual(failed.status_code, 401, failed.text)
+
+            locked = self.client.post(
+                "/api/auth/login",
+                json={"email": "locked@example.com", "password": "UserPass123!"},
+            )
+            self.assertEqual(locked.status_code, 429, locked.text)
+            self.assertEqual(locked.json()["detail"]["error"]["code"], "login_rate_limited")
+
+            current += timedelta(seconds=61)
+            failed_after_first_lock = self.client.post(
+                "/api/auth/login",
+                json={"email": "locked@example.com", "password": "wrong-pass"},
+            )
+            self.assertEqual(failed_after_first_lock.status_code, 401, failed_after_first_lock.text)
+
+            still_locked = self.client.post(
+                "/api/auth/login",
+                json={"email": "locked@example.com", "password": "UserPass123!"},
+            )
+            self.assertEqual(still_locked.status_code, 429, still_locked.text)
+
+            current += timedelta(seconds=121)
+            logged_in = self.client.post(
+                "/api/auth/login",
+                json={"email": "locked@example.com", "password": "UserPass123!"},
+            )
+            self.assertEqual(logged_in.status_code, 200, logged_in.text)
+
+            for _ in range(5):
+                failed = self.client.post(
+                    "/api/auth/login",
+                    json={"email": "locked@example.com", "password": "wrong-pass"},
+                )
+                self.assertEqual(failed.status_code, 401, failed.text)
+            relocked = self.client.post(
+                "/api/auth/login",
+                json={"email": "locked@example.com", "password": "UserPass123!"},
+            )
+            self.assertEqual(relocked.status_code, 429, relocked.text)
+
+    def test_unknown_and_invalid_login_failures_do_not_persist_or_lock_later_user(self) -> None:
+        admin_token = self.create_admin()
+        service_module = importlib.import_module("services.user_service")
+
+        for _ in range(6):
+            missing = self.client.post(
+                "/api/auth/login",
+                json={"email": "future@example.com", "password": "wrong-pass"},
+            )
+            self.assertEqual(missing.status_code, 401, missing.text)
+            invalid = self.client.post(
+                "/api/auth/login",
+                json={"email": "not-an-email", "password": "wrong-pass"},
+            )
+            self.assertEqual(invalid.status_code, 401, invalid.text)
+
+        service = self.user_service()
+        with service.Session() as session:
+            self.assertIsNone(session.get(service_module.LoginFailureLimitModel, "future@example.com"))
+            self.assertIsNone(session.get(service_module.LoginFailureLimitModel, "not-an-email"))
+
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "future@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        logged_in = self.client.post(
+            "/api/auth/login",
+            json={"email": "future@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(logged_in.status_code, 200, logged_in.text)
+
+    def test_concurrent_failed_logins_increment_existing_user_limit_safely(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "concurrent@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        service = self.user_service()
+        service_module = importlib.import_module("services.user_service")
+        worker_count = service_module.LOGIN_FAILURE_THRESHOLD
+        barrier = Barrier(worker_count)
+
+        def always_wrong(_hash: str, _password: str) -> bool:
+            barrier.wait(timeout=5)
+            return False
+
+        def attempt_login() -> str:
+            try:
+                service.login("concurrent@example.com", "wrong-pass")
+            except service_module.UserServiceError as exc:
+                return exc.code
+            return "unexpected_success"
+
+        with patch.object(service, "verify_password", side_effect=always_wrong):
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                results = list(executor.map(lambda _: attempt_login(), range(worker_count)))
+
+        self.assertEqual(results, ["invalid_credentials"] * worker_count)
+        with service.Session() as session:
+            row = session.get(service_module.LoginFailureLimitModel, "concurrent@example.com")
+            self.assertIsNotNone(row)
+            self.assertEqual(row.failed_attempts, worker_count)
+            self.assertIsNotNone(row.locked_until)
 
     def test_jwt_secret_without_env_is_file_backed_not_auth_settings(self) -> None:
         secret_file = Path(self.tmp.name) / "jwt_hmac_secret"
@@ -336,6 +495,141 @@ class UserManagementAPITests(unittest.TestCase):
         self.assertEqual(target_after["image_quota"], 2)
         self.assertEqual(target_after["active_image_requests"], 0)
 
+    def test_stale_reserved_image_usage_events_are_recovered_once(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "quota-stale@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 2,
+                "image_concurrency": 2,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        user_id = created.json()["item"]["id"]
+
+        service = self.user_service()
+        service_module = importlib.import_module("services.user_service")
+        identity = {"id": user_id, "role": "user", "name": "quota-stale@example.com"}
+        reservation = service.reserve_image_quota(identity, 2, "/api/image/generations")
+        with service.Session() as session:
+            event = session.get(service_module.ImageUsageEventModel, reservation.event_id)
+            event.created_at = service_module.utc_now() - timedelta(hours=1)
+            session.commit()
+
+        before = service.get_user(user_id)
+        self.assertEqual(before["image_quota"], 0)
+        self.assertEqual(before["active_image_requests"], 1)
+
+        recovered = service.recover_stale_image_quota_reservations(stale_after_seconds=0)
+        recovered_again = service.recover_stale_image_quota_reservations(stale_after_seconds=0)
+
+        after = service.get_user(user_id)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(recovered_again, 0)
+        self.assertEqual(after["image_quota"], 2)
+        self.assertEqual(after["active_image_requests"], 0)
+
+    def test_startup_stale_recovery_waits_six_hours_by_default_and_honors_env_override(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "quota-startup-stale@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 2,
+                "image_concurrency": 2,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        user_id = created.json()["item"]["id"]
+
+        service = self.user_service()
+        service_module = importlib.import_module("services.user_service")
+        identity = {"id": user_id, "role": "user", "name": "quota-startup-stale@example.com"}
+        reservation = service.reserve_image_quota(identity, 1, "/api/image/generations")
+        with service.Session() as session:
+            event = session.get(service_module.ImageUsageEventModel, reservation.event_id)
+            event.created_at = service_module.utc_now() - timedelta(hours=1)
+            session.commit()
+
+        second_service = service_module.UserService(service.database_url)
+        try:
+            self.assertEqual(service.get_user(user_id)["image_quota"], 1)
+            self.assertEqual(service.get_user(user_id)["active_image_requests"], 1)
+        finally:
+            second_service.engine.dispose()
+
+        os.environ["GENAPI_STALE_IMAGE_QUOTA_SECONDS"] = "60"
+        os.environ["GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS"] = "0"
+        third_service = service_module.UserService(service.database_url)
+        try:
+            self.assertEqual(service.get_user(user_id)["image_quota"], 2)
+            self.assertEqual(service.get_user(user_id)["active_image_requests"], 0)
+        finally:
+            third_service.engine.dispose()
+
+    def test_empty_stale_recovery_attempts_are_throttled(self) -> None:
+        service = self.user_service()
+        service_module = importlib.import_module("services.user_service")
+        service_module._LAST_STALE_RECOVERY_AT = None
+        os.environ["GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS"] = "60"
+
+        with patch.object(service, "recover_stale_image_quota_reservations", return_value=0) as recover_mock:
+            first = service._recover_stale_image_quota_reservations_throttled()
+            second = service._recover_stale_image_quota_reservations_throttled()
+
+        self.assertEqual(first, 0)
+        self.assertEqual(second, 0)
+        self.assertEqual(recover_mock.call_count, 1)
+
+    def test_reserve_image_quota_recovers_stale_reservation_without_restart(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "quota-live-stale@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 1,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        user_id = created.json()["item"]["id"]
+
+        os.environ["GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS"] = "0"
+        service = self.user_service()
+        service_module = importlib.import_module("services.user_service")
+        identity = {"id": user_id, "role": "user", "name": "quota-live-stale@example.com"}
+        reservation = service.reserve_image_quota(identity, 1, "/api/image/generations")
+        with service.Session() as session:
+            event = session.get(service_module.ImageUsageEventModel, reservation.event_id)
+            event.created_at = service_module.utc_now() - timedelta(hours=1)
+            session.commit()
+
+        os.environ["GENAPI_STALE_IMAGE_QUOTA_SECONDS"] = "60"
+        second_reservation = service.reserve_image_quota(identity, 1, "/api/image/generations")
+
+        after = service.get_user(user_id)
+        self.assertTrue(second_reservation.event_id)
+        self.assertEqual(after["image_quota"], 0)
+        self.assertEqual(after["active_image_requests"], 1)
+        with service.Session() as session:
+            recovered = session.get(service_module.ImageUsageEventModel, reservation.event_id)
+            current = session.get(service_module.ImageUsageEventModel, second_reservation.event_id)
+        self.assertEqual(recovered.status, "recovered")
+        self.assertEqual(current.status, "reserved")
+
     def test_internal_web_image_edit_route_remains_available_after_v1_removal(self) -> None:
         admin_token = self.create_admin()
         created = self.client.post(
@@ -375,6 +669,161 @@ class UserManagementAPITests(unittest.TestCase):
         self.assertEqual(payload["prompt"], "make it brighter")
         self.assertEqual(payload["model"], "gpt-image-2")
         self.assertEqual(payload["images"][0][1], "reference.png")
+
+    def test_image_edit_read_unexpected_exception_refunds_quota_and_releases_concurrency(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "edit-read-fail@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 1,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "edit-read-fail@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        headers = self.auth_headers(login.json()["token"])
+
+        with patch("api.ai._read_limited_uploads", side_effect=RuntimeError("upload read failed")):
+            with self.assertRaisesRegex(RuntimeError, "upload read failed"):
+                self.client.post(
+                    "/api/image/edits",
+                    headers=headers,
+                    data={"prompt": "edit", "model": "gpt-image-2", "n": "1"},
+                    files={"image": ("reference.png", b"fake-image", "image/png")},
+                )
+
+        user = self.client.get("/api/auth/me", headers=headers).json()["user"]
+        self.assertEqual(user["image_quota"], 1)
+        self.assertEqual(user["active_image_requests"], 0)
+
+    def test_image_edit_rejects_too_many_uploads_before_handler(self) -> None:
+        admin_token = self.create_admin()
+
+        with patch("api.ai.openai_v1_image_edit.handle", return_value={"data": []}) as edit_handler:
+            response = self.client.post(
+                "/api/image/edits",
+                headers=self.auth_headers(admin_token),
+                data={"prompt": "too many", "model": "gpt-image-2", "n": "1"},
+                files=[
+                    ("image", (f"reference-{index}.png", b"fake-image", "image/png"))
+                    for index in range(5)
+                ],
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        edit_handler.assert_not_called()
+
+    def test_image_edit_rejects_oversized_upload_before_handler(self) -> None:
+        admin_token = self.create_admin()
+        oversized = b"x" * (20 * 1024 * 1024 + 1)
+
+        with patch("api.ai.openai_v1_image_edit.handle", return_value={"data": []}) as edit_handler:
+            response = self.client.post(
+                "/api/image/edits",
+                headers=self.auth_headers(admin_token),
+                data={"prompt": "too large", "model": "gpt-image-2", "n": "1"},
+                files={"image": ("reference.png", oversized, "image/png")},
+            )
+
+        self.assertEqual(response.status_code, 413, response.text)
+        edit_handler.assert_not_called()
+
+    def test_image_edit_rejects_total_upload_size_before_handler(self) -> None:
+        admin_token = self.create_admin()
+        ai_module = sys.modules["api.ai"]
+
+        with (
+            patch.object(ai_module, "IMAGE_EDIT_MAX_TOTAL_SIZE_BYTES", 10, create=True),
+            patch("api.ai.openai_v1_image_edit.handle", return_value={"data": []}) as edit_handler,
+        ):
+            response = self.client.post(
+                "/api/image/edits",
+                headers=self.auth_headers(admin_token),
+                data={"prompt": "too large together", "model": "gpt-image-2", "n": "1"},
+                files=[
+                    ("image", ("first.png", b"123456", "image/png")),
+                    ("image", ("second.png", b"123456", "image/png")),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 413, response.text)
+        edit_handler.assert_not_called()
+
+    def test_send_verify_code_sends_email_outside_route_thread(self) -> None:
+        user_module = sys.modules["api.user_management"]
+        original_create_code = user_module.user_service.create_email_verification_code
+        threads: dict[str, int] = {}
+
+        def tracked_create_code(email: str, purpose: str) -> str:
+            threads["route"] = threading.get_ident()
+            return original_create_code(email, purpose)
+
+        def tracked_send(email: str, code: str) -> None:
+            threads["send"] = threading.get_ident()
+
+        with (
+            patch.object(user_module.user_service, "create_email_verification_code", side_effect=tracked_create_code),
+            patch.object(user_module.email_service, "send_verification_code", side_effect=tracked_send),
+        ):
+            response = self.client.post(
+                "/api/auth/send-verify-code",
+                json={"email": "threaded-send@example.com", "purpose": "register"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("route", threads)
+        self.assertIn("send", threads)
+        self.assertNotEqual(threads["route"], threads["send"])
+
+    def test_login_runs_user_service_login_outside_route_thread(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "threaded-login@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        user_module = sys.modules["api.user_management"]
+        original_login = user_module.user_service.login
+        original_auth_payload = user_module.auth_payload
+        threads: dict[str, int] = {}
+
+        def tracked_login(email: str, password: str) -> dict[str, object]:
+            threads["login"] = threading.get_ident()
+            return original_login(email, password)
+
+        def tracked_auth_payload(result: dict[str, object], app_version: str) -> dict[str, object]:
+            threads["route"] = threading.get_ident()
+            return original_auth_payload(result, app_version)
+
+        with (
+            patch.object(user_module.user_service, "login", side_effect=tracked_login),
+            patch.object(user_module, "auth_payload", side_effect=tracked_auth_payload),
+        ):
+            response = self.client.post(
+                "/api/auth/login",
+                json={"email": "threaded-login@example.com", "password": "UserPass123!"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("route", threads)
+        self.assertIn("login", threads)
+        self.assertNotEqual(threads["route"], threads["login"])
 
     def test_send_verify_code_uses_register_purpose_for_cooldown(self) -> None:
         with patch("api.user_management.email_service.send_verification_code", return_value=None):

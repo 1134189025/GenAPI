@@ -14,14 +14,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
-import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from services.account_service import account_service
 from services.register import mail_provider
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 base_dir = Path(__file__).resolve().parent
 config = {
     "mail": {
@@ -269,7 +267,6 @@ def build_sentinel_token(session: requests.Session, device_id: str, flow: str) -
             "sec-ch-ua-platform": '"Windows"',
         },
         timeout=20,
-        verify=False,
     )
     data = _response_json(resp)
     token = str(data.get("token") or "").strip()
@@ -290,7 +287,7 @@ def create_session(proxy: str = "") -> requests.Session:
     adapter = HTTPAdapter(max_retries=retry, pool_connections=50, pool_maxsize=50)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    session.verify = False
+    session.verify = True
     if proxy:
         session.proxies.update({"http": proxy, "https": proxy})
     return session
@@ -312,11 +309,11 @@ def validate_otp(session: requests.Session, device_id: str, code: str):
     headers["referer"] = f"{auth_base}/email-verification"
     headers["oai-device-id"] = device_id
     headers.update(_make_trace_headers())
-    resp, error = request_with_local_retry(session, "post", f"{auth_base}/api/accounts/email-otp/validate", json={"code": code}, headers=headers, verify=False)
+    resp, error = request_with_local_retry(session, "post", f"{auth_base}/api/accounts/email-otp/validate", json={"code": code}, headers=headers)
     if resp is not None and resp.status_code == 200:
         return resp, ""
     headers["openai-sentinel-token"] = build_sentinel_token(session, device_id, "authorize_continue")
-    resp, error = request_with_local_retry(session, "post", f"{auth_base}/api/accounts/email-otp/validate", json={"code": code}, headers=headers, verify=False)
+    resp, error = request_with_local_retry(session, "post", f"{auth_base}/api/accounts/email-otp/validate", json={"code": code}, headers=headers)
     return resp, error
 
 
@@ -338,7 +335,7 @@ def extract_oauth_callback_params_from_consent_session(session: requests.Session
         consent_url = f"{auth_base}{consent_url}"
     current_url = consent_url
     for _ in range(10):
-        response = session.get(current_url, headers=navigate_headers, verify=False, timeout=30, allow_redirects=False)
+        response = session.get(current_url, headers=navigate_headers, timeout=30, allow_redirects=False)
         callback_params = extract_oauth_callback_params_from_url(str(response.url)) or extract_oauth_callback_params_from_url(str(response.headers.get("Location") or "").strip())
         if callback_params:
             return callback_params
@@ -362,7 +359,7 @@ def extract_oauth_callback_params_from_consent_session(session: requests.Session
     headers["referer"] = consent_url
     headers["oai-device-id"] = device_id
     headers.update(_make_trace_headers())
-    ws_resp = session.post(f"{auth_base}/api/accounts/workspace/select", json={"workspace_id": workspace_id}, headers=headers, verify=False, timeout=30, allow_redirects=False)
+    ws_resp = session.post(f"{auth_base}/api/accounts/workspace/select", json={"workspace_id": workspace_id}, headers=headers, timeout=30, allow_redirects=False)
     callback_params = extract_oauth_callback_params_from_url(str(ws_resp.headers.get("Location") or "").strip())
     if callback_params:
         return callback_params
@@ -381,7 +378,7 @@ def extract_oauth_callback_params_from_consent_session(session: requests.Session
     body = {"org_id": org_id}
     if project_id:
         body["project_id"] = project_id
-    org_resp = session.post(f"{auth_base}/api/accounts/organization/select", json=body, headers=org_headers, verify=False, timeout=30, allow_redirects=False)
+    org_resp = session.post(f"{auth_base}/api/accounts/organization/select", json=body, headers=org_headers, timeout=30, allow_redirects=False)
     return extract_oauth_callback_params_from_url(str(org_resp.headers.get("Location") or "").strip())
 
 
@@ -402,7 +399,6 @@ def exchange_platform_tokens(session: requests.Session, device_id: str, code_ver
             "client_id": platform_oauth_client_id,
             "code_verifier": code_verifier,
         },
-        verify=False,
         timeout=60,
     )
     data = _response_json(resp)
@@ -461,7 +457,7 @@ class PlatformRegistrar:
             "code_challenge_method": "S256",
             "auth0Client": platform_auth0_client,
         }
-        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/authorize?{urlencode(params)}", headers=self._navigate_headers(f"{platform_base}/"), allow_redirects=True, verify=False)
+        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/authorize?{urlencode(params)}", headers=self._navigate_headers(f"{platform_base}/"), allow_redirects=True)
         if resp is None or resp.status_code != 200:
             raise RuntimeError(error or f"platform_authorize_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "platform authorize 完成")
@@ -470,14 +466,14 @@ class PlatformRegistrar:
         step(index, "开始提交注册密码")
         headers = self._json_headers(f"{auth_base}/create-account/password")
         headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "username_password_create")
-        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/user/register", json={"username": email, "password": password}, headers=headers, verify=False)
+        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/user/register", json={"username": email, "password": password}, headers=headers)
         if resp is None or resp.status_code != 200:
             raise RuntimeError(error or f"user_register_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "提交注册密码完成")
 
     def _send_otp(self, index: int) -> None:
         step(index, "开始发送验证码")
-        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/email-otp/send", headers=self._navigate_headers(f"{auth_base}/create-account/password"), allow_redirects=True, verify=False)
+        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/email-otp/send", headers=self._navigate_headers(f"{auth_base}/create-account/password"), allow_redirects=True)
         if resp is None or resp.status_code not in (200, 302):
             raise RuntimeError(error or f"send_otp_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "发送验证码完成")
@@ -493,7 +489,7 @@ class PlatformRegistrar:
         step(index, "开始创建账号资料")
         headers = self._json_headers(f"{auth_base}/about-you")
         headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "oauth_create_account")
-        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/create_account", json={"name": name, "birthdate": birthdate}, headers=headers, verify=False)
+        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/create_account", json={"name": name, "birthdate": birthdate}, headers=headers)
         if resp is None or resp.status_code not in (200, 302):
             raise RuntimeError(error or f"create_account_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "创建账号资料完成")
@@ -519,13 +515,13 @@ class PlatformRegistrar:
             "code_challenge_method": "S256",
             "auth0Client": platform_auth0_client,
         }
-        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/authorize?{urlencode(params)}", headers=self._navigate_headers(f"{platform_base}/"), allow_redirects=True, verify=False)
+        resp, error = request_with_local_retry(self.session, "get", f"{auth_base}/api/accounts/authorize?{urlencode(params)}", headers=self._navigate_headers(f"{platform_base}/"), allow_redirects=True)
         if resp is None:
             raise RuntimeError(error or "platform_login_authorize_failed")
         step(index, "登录 authorize 完成")
         headers = self._json_headers(f"{auth_base}/log-in/password")
         headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "password_verify")
-        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/password/verify", json={"password": password}, headers=headers, allow_redirects=False, verify=False)
+        resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/password/verify", json={"password": password}, headers=headers, allow_redirects=False)
         if resp is None or resp.status_code != 200:
             raise RuntimeError(error or f"password_verify_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "密码校验完成")
