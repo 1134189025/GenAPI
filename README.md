@@ -158,6 +158,7 @@ Genapi 的账号池用于集中管理上游 OpenAI 账号，并为网页生图�
 - 本地会话历史。
 - 图片结果回看、删除和清空。
 - 服务端图片缓存 URL。
+- 私有用户图库，近期生成图可查看、下载并继续编辑。
 - 用户维度的生图历史隔离。
 
 支持的模型选项包括 `gpt-image-2`、`codex-gpt-image-2`、`auto` 以及若干 ChatGPT 官网相关模型别名。实际可用性取决于账号池中账号的权限、订阅和上游状态。
@@ -206,6 +207,7 @@ docker compose up -d
 - `/login`：登录。
 - `/register`：用户注册。
 - `/image`：用户生图。
+- `/gallery`：用户图库。
 - `/membership`：会员中心。
 - `/redeem`：用户兑换。
 - `/admin/accounts`：账号池。
@@ -246,6 +248,7 @@ cp .env.example .env
 - `data/jwt_hmac_secret`：自动生成的 JWT HMAC 密钥。
 - `data/accounts.json` 或数据库账号池：上游账号数据。
 - `data/images/`：生成图片缓存，默认保留 30 天且全局上限 10GB，可在后台系统设置调整。
+- `data/gallery_images/`：用户私有图库文件，当前默认保留 7 天，通过鉴权接口访问。
 - `data/logs.jsonl`：运行日志。
 
 这些文件包含敏感信息，不应提交到仓库。
@@ -359,6 +362,10 @@ Genapi 当前只保留网页内部接口。
 
 - `POST /api/image/generations`
 - `POST /api/image/edits`
+- `GET /api/gallery/images`
+- `GET /api/gallery/images/{id}`
+- `GET /api/gallery/images/{id}/content`
+- `DELETE /api/gallery/images/{id}`
 - `POST /api/auth/login`
 - `POST /api/auth/register`
 - `POST /api/auth/send-verify-code`

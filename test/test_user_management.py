@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib
 import os
 import sys
@@ -13,6 +14,11 @@ from threading import Barrier, local
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
 
 
 class UserManagementAPITests(unittest.TestCase):
@@ -52,6 +58,7 @@ class UserManagementAPITests(unittest.TestCase):
         for module_name in list(sys.modules):
             if (
                 module_name.startswith("api.")
+                or module_name.startswith("services.gallery")
                 or module_name.startswith("services.user")
                 or module_name == "api"
             ):
@@ -389,7 +396,7 @@ class UserManagementAPITests(unittest.TestCase):
 
         with patch(
             "api.ai.openai_v1_image_generations.handle",
-            return_value={"created": 1, "data": [{"b64_json": "abc"}]},
+            return_value={"created": 1, "data": [{"b64_json": PNG_B64}]},
         ):
             first = self.client.post(
                 "/api/image/generations",
@@ -655,7 +662,7 @@ class UserManagementAPITests(unittest.TestCase):
 
         with patch(
             "api.ai.openai_v1_image_edit.handle",
-            return_value={"created": 1, "data": [{"b64_json": "edited"}]},
+            return_value={"created": 1, "data": [{"b64_json": PNG_B64}]},
         ) as edit_handler:
             response = self.client.post(
                 "/api/image/edits",
@@ -664,7 +671,7 @@ class UserManagementAPITests(unittest.TestCase):
                 files={"image": ("reference.png", b"fake-image", "image/png")},
             )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["data"][0]["b64_json"], "edited")
+        self.assertEqual(response.json()["data"][0]["b64_json"], PNG_B64)
         payload = edit_handler.call_args.args[0]
         self.assertEqual(payload["prompt"], "make it brighter")
         self.assertEqual(payload["model"], "gpt-image-2")

@@ -1,4 +1,4 @@
-import { httpRequest } from "@/lib/request";
+import { httpBlobRequest, httpRequest } from "@/lib/request";
 
 export type AccountType = "Free" | "Plus" | "ProLite" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
@@ -88,6 +88,31 @@ export type ManagedImage = {
   created_at: string;
 };
 
+export type GalleryImage = {
+  id: string;
+  content_url: string;
+  prompt: string;
+  revised_prompt?: string;
+  model: ImageModel | string;
+  size: string;
+  created_at: string;
+  expires_at: string;
+  size_bytes: number;
+  byte_size?: number;
+  [key: string]: unknown;
+};
+
+export type GalleryImagesResponse = {
+  items: GalleryImage[];
+  next_cursor?: string | null;
+  has_more?: boolean;
+};
+
+export type FetchGalleryImagesOptions = {
+  cursor?: string | null;
+  limit?: number;
+};
+
 export type SystemLog = {
   time: string;
   type: "call" | "account" | string;
@@ -98,7 +123,14 @@ export type SystemLog = {
 
 export type ImageResponse = {
   created: number;
-  data: Array<{ b64_json: string; revised_prompt?: string }>;
+  data: Array<{
+    b64_json?: string;
+    url?: string;
+    revised_prompt?: string;
+    gallery_id?: string;
+    content_url?: string;
+    expires_at?: string;
+  }>;
 };
 
 export type LoginResponse = {
@@ -520,6 +552,27 @@ export async function editImage(
       body: formData,
     },
   );
+}
+
+export async function fetchGalleryImages(options?: FetchGalleryImagesOptions | string | null) {
+  const cursor = typeof options === "string" ? options : options?.cursor;
+  const limit = typeof options === "string" ? undefined : options?.limit;
+  const params = new URLSearchParams();
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  if (typeof limit === "number" && Number.isFinite(limit)) {
+    params.set("limit", String(limit));
+  }
+  return httpRequest<GalleryImagesResponse>(`/api/gallery/images${params.toString() ? `?${params.toString()}` : ""}`);
+}
+
+export async function deleteGalleryImage(imageId: string) {
+  return httpRequest<{ ok: true }>(`/api/gallery/images/${encodeURIComponent(imageId)}`, { method: "DELETE" });
+}
+
+export async function fetchGalleryImageContentBlob(imageId: string) {
+  return httpBlobRequest(`/api/gallery/images/${encodeURIComponent(imageId)}/content`);
 }
 
 export async function fetchSettingsConfig() {

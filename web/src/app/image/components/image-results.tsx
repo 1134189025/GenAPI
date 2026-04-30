@@ -80,12 +80,12 @@ export function ImageResults({
           src: image.dataUrl,
         }));
         const successfulTurnImages = turn.images.flatMap((image) =>
-          image.status === "success" && image.b64_json
+          image.status === "success" && (image.b64_json || image.url)
             ? [
                 {
                   id: image.id,
-                  src: `data:image/png;base64,${image.b64_json}`,
-                  sizeLabel: formatBase64ImageSize(image.b64_json),
+                  src: image.b64_json ? `data:image/png;base64,${image.b64_json}` : image.url || "",
+                  sizeLabel: image.b64_json ? formatBase64ImageSize(image.b64_json) : undefined,
                   dimensions: imageDimensions[image.id],
                 },
               ]
@@ -150,12 +150,14 @@ export function ImageResults({
 
                 <div className="columns-1 gap-4 space-y-4 sm:columns-2 xl:columns-3">
                   {turn.images.map((image, index) => {
-                    if (image.status === "success" && image.b64_json) {
+                    if (image.status === "success" && (image.b64_json || image.url)) {
                       const currentIndex = successfulTurnImages.findIndex((item) => item.id === image.id);
-                      const sizeLabel = formatBase64ImageSize(image.b64_json);
+                      const sizeLabel = image.b64_json ? formatBase64ImageSize(image.b64_json) : "";
                       const dimensions = imageDimensions[image.id];
                       const imageMeta = [sizeLabel, dimensions].filter(Boolean).join(" · ");
-                      const imageSrc = `data:image/png;base64,${image.b64_json}`;
+                      const serverImageSrc = image.url || "";
+                      const imageSrc = image.b64_json ? `data:image/png;base64,${image.b64_json}` : serverImageSrc;
+                      const downloadSrc = image.b64_json ? imageSrc : image.url || imageSrc;
 
                       return (
                         <div
@@ -184,7 +186,7 @@ export function ImageResults({
                             <div className="min-w-0 text-xs text-stone-500">{imageMeta || `图片 ${index + 1}`}</div>
                             <div className="flex items-center gap-2">
                               <a
-                                href={imageSrc}
+                                href={downloadSrc}
                                 download={`genapi-image-${image.id}.png`}
                                 className="inline-flex h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 transition hover:bg-stone-50"
                               >

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
+from collections.abc import Iterable
+
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.support import require_identity, resolve_image_base_url
+from services.gallery_service import gallery_service
 from services.log_service import LoggedCall
 from services.quota_service import openai_quota_error, reserve_image_quota, settle_image_quota
 from services.user_service import UserServiceError
@@ -40,6 +44,87 @@ def _reserve_or_error(identity: dict[str, object], count: int, endpoint: str):
         if exc.status_code == 429:
             return JSONResponse(status_code=429, content=openai_quota_error(exc))
         raise HTTPException(status_code=exc.status_code, detail={"error": exc.message}) from exc
+
+
+def _attach_gallery_images(
+        result: object,
+        *,
+        identity: dict[str, object],
+        quota_reservation,
+        endpoint: str,
+        source: str,
+        prompt: str,
+        model: str,
+        size: str | None,
+        response_format: str,
+) -> object:
+    if isinstance(result, Iterable) and not isinstance(result, (dict, str, bytes, bytearray)):
+        return (
+            _attach_gallery_images(
+                item,
+                identity=identity,
+                quota_reservation=quota_reservation,
+                endpoint=endpoint,
+                source=source,
+                prompt=prompt,
+                model=model,
+                size=size,
+                response_format=response_format,
+            )
+            for item in result
+        )
+    if not isinstance(result, dict):
+        return result
+    data = result.get("data")
+    if not isinstance(data, list):
+        return result
+    user_id = str(identity.get("id") or "").strip()
+    if not user_id:
+        return result
+    usage_event_id = getattr(quota_reservation, "event_id", "") or None
+    created_gallery_ids: list[str] = []
+    try:
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            if item.get("gallery_id"):
+                if response_format != "b64_json":
+                    item.pop("b64_json", None)
+                continue
+            b64_json = str(item.get("b64_json") or "").strip()
+            if not b64_json:
+                continue
+            try:
+                image_data = base64.b64decode(b64_json)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail={"error": "invalid generated image data"}) from exc
+            gallery_item = gallery_service.save_user_image(
+                user_id=user_id,
+                image_data=image_data,
+                prompt=prompt,
+                revised_prompt=str(item.get("revised_prompt") or ""),
+                model=model,
+                size=size or "",
+                source=source,
+                source_endpoint=endpoint,
+                usage_event_id=usage_event_id,
+            )
+            gallery_id = str(gallery_item["id"])
+            created_gallery_ids.append(gallery_id)
+            item["gallery_id"] = gallery_id
+            item["content_url"] = gallery_item["content_url"]
+            item["url"] = gallery_item["content_url"]
+            item["expires_at"] = gallery_item["expires_at"]
+            if response_format != "b64_json":
+                item.pop("b64_json", None)
+    except Exception:
+        for gallery_id in created_gallery_ids:
+            try:
+                gallery_service.discard_user_image(user_id, gallery_id)
+            except Exception:
+                pass
+        raise
+    return result
 
 
 async def _read_limited_uploads(uploads: list[UploadFile]) -> list[tuple[bytes, str, str]]:
@@ -80,11 +165,26 @@ def create_router() -> APIRouter:
         identity = require_identity(authorization)
         payload = body.model_dump(mode="python")
         payload["base_url"] = resolve_image_base_url(request)
+        payload["save_public_images"] = False
         quota_reservation = _reserve_or_error(identity, body.n, "/api/image/generations")
         if isinstance(quota_reservation, JSONResponse):
             return quota_reservation
         call = LoggedCall(identity, "/api/image/generations", body.model, "文生图")
-        return await call.run(openai_v1_image_generations.handle, payload, quota_reservation)
+
+        def handle_with_gallery(call_payload):
+            return _attach_gallery_images(
+                openai_v1_image_generations.handle(call_payload),
+                identity=identity,
+                quota_reservation=quota_reservation,
+                endpoint="/api/image/generations",
+                source="generation",
+                prompt=body.prompt,
+                model=body.model,
+                size=body.size,
+                response_format=body.response_format,
+            )
+
+        return await call.run(handle_with_gallery, payload, quota_reservation)
 
     @router.post("/api/image/edits")
     async def edit_images(
@@ -125,8 +225,23 @@ def create_router() -> APIRouter:
             "response_format": response_format,
             "stream": stream,
             "base_url": resolve_image_base_url(request),
+            "save_public_images": False,
         }
         call = LoggedCall(identity, "/api/image/edits", model, "图生图")
-        return await call.run(openai_v1_image_edit.handle, payload, quota_reservation)
+
+        def handle_with_gallery(call_payload):
+            return _attach_gallery_images(
+                openai_v1_image_edit.handle(call_payload),
+                identity=identity,
+                quota_reservation=quota_reservation,
+                endpoint="/api/image/edits",
+                source="edit",
+                prompt=prompt,
+                model=model,
+                size=size,
+                response_format=response_format,
+            )
+
+        return await call.run(handle_with_gallery, payload, quota_reservation)
 
     return router

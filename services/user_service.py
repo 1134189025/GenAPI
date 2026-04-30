@@ -22,6 +22,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -262,6 +263,42 @@ class ImageUsageEventModel(Base):
     settled_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class UserGalleryImageModel(Base):
+    __tablename__ = "user_gallery_images"
+    __table_args__ = (
+        Index("ix_user_gallery_user_status_deleted_created_id", "user_id", "status", "deleted_at", "created_at", "id"),
+        Index("ix_user_gallery_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_user_gallery_cleanup", "status", "expires_at", "deleted_at"),
+        Index("ix_user_gallery_usage_event", "usage_event_id"),
+        Index("ix_user_gallery_sha256", "sha256"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    usage_event_id = Column(String(36), ForeignKey("image_usage_events.id"), nullable=True, index=True)
+    source_endpoint = Column(String(128), nullable=False, default="")
+    source = Column(String(32), nullable=False, default="generation", index=True)
+    status = Column(String(32), nullable=False, default="available", index=True)
+    prompt = Column(Text, nullable=False, default="")
+    revised_prompt = Column(Text, nullable=False, default="")
+    model = Column(String(80), nullable=False, default="")
+    size = Column(String(32), nullable=False, default="")
+    storage_path = Column(Text, nullable=False, unique=True)
+    content_type = Column(String(80), nullable=False, default="image/png")
+    size_bytes = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String(64), nullable=False, default="")
+    share_status = Column(String(32), nullable=False, default="private", index=True)
+    share_token = Column(String(128), nullable=True, unique=True)
+    share_requested_at = Column(DateTime(timezone=True), nullable=True)
+    shared_at = Column(DateTime(timezone=True), nullable=True)
+    share_review_note = Column(Text, nullable=False, default="")
+    metadata_json = Column("metadata", Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 DEFAULT_SETTINGS: dict[str, object] = {
     "site_name": "Genapi",
     "registration_enabled": True,
@@ -380,6 +417,52 @@ class UserService:
             add_column("login_failure_limits", "locked_until", DateTime(timezone=True))
             add_column("login_failure_limits", "created_at", DateTime(timezone=True))
             add_column("login_failure_limits", "updated_at", DateTime(timezone=True))
+        if "user_gallery_images" in table_names:
+            gallery_columns = {column["name"] for column in inspector.get_columns("user_gallery_images")}
+            for name, column_type, suffix in [
+                ("usage_event_id", String(36), ""),
+                ("source_endpoint", String(128), "NOT NULL DEFAULT ''"),
+                ("source", String(32), "NOT NULL DEFAULT 'generation'"),
+                ("status", String(32), "NOT NULL DEFAULT 'available'"),
+                ("prompt", Text(), "NOT NULL DEFAULT ''"),
+                ("revised_prompt", Text(), "NOT NULL DEFAULT ''"),
+                ("model", String(80), "NOT NULL DEFAULT ''"),
+                ("size", String(32), "NOT NULL DEFAULT ''"),
+                ("content_type", String(80), "NOT NULL DEFAULT 'image/png'"),
+                ("size_bytes", Integer(), "NOT NULL DEFAULT 0"),
+                ("sha256", String(64), "NOT NULL DEFAULT ''"),
+                ("share_status", String(32), "NOT NULL DEFAULT 'private'"),
+                ("share_token", String(128), ""),
+                ("share_requested_at", DateTime(timezone=True), ""),
+                ("shared_at", DateTime(timezone=True), ""),
+                ("share_review_note", Text(), "NOT NULL DEFAULT ''"),
+                ("metadata", Text(), "NOT NULL DEFAULT ''"),
+                ("updated_at", DateTime(timezone=True), ""),
+                ("deleted_at", DateTime(timezone=True), ""),
+            ]:
+                if name not in gallery_columns:
+                    add_column("user_gallery_images", name, column_type, suffix)
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_user_gallery_user_status_deleted_created_id "
+                    "ON user_gallery_images (user_id, status, deleted_at, created_at, id)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_user_gallery_user_status_created "
+                    "ON user_gallery_images (user_id, status, created_at)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_user_gallery_cleanup "
+                    "ON user_gallery_images (status, expires_at, deleted_at)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_user_gallery_usage_event "
+                    "ON user_gallery_images (usage_event_id)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_user_gallery_sha256 "
+                    "ON user_gallery_images (sha256)"
+                )
 
     @staticmethod
     def _env_int(names: tuple[str, ...], default: int) -> int:
@@ -1160,6 +1243,7 @@ class UserService:
                 raise UserServiceError("user not found", status_code=404, code="not_found")
             has_history = (
                 session.query(ImageUsageEventModel).filter(ImageUsageEventModel.user_id == user.id).count()
+                or session.query(UserGalleryImageModel).filter(UserGalleryImageModel.user_id == user.id).count()
                 or session.query(RedeemCodeModel).filter(RedeemCodeModel.used_by_user_id == user.id).count()
                 or session.query(PromoCodeUsageModel).filter(PromoCodeUsageModel.user_id == user.id).count()
             )

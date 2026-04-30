@@ -25,11 +25,12 @@ describe("dashboard shell navigation", () => {
   test("keeps user navigation focused on image membership and redeem pages", () => {
     const userRoutes = getNavigationGroups("user").flatMap((group) => group.items.map((item) => item.href));
 
-    expect(userRoutes).toEqual(["/image", "/membership", "/redeem"]);
+    expect(userRoutes).toEqual(["/image", "/gallery", "/membership", "/redeem"]);
   });
 
   test("resolves page metadata for canonical and legacy routes", () => {
     expect(getPageMeta("/membership").title).toBe("会员中心");
+    expect(getPageMeta("/gallery").title).toBe("图库");
     expect(getPageMeta("/admin/membership-plans").description).toContain("会员套餐");
     expect(getPageMeta("/admin/accounts").title).toBe("账号池");
     expect(getPageMeta("/accounts").title).toBe("账号池");
@@ -48,6 +49,7 @@ describe("dashboard shell navigation", () => {
     expect(isPublicAppRoute("/register")).toBe(true);
     expect(isPublicAppRoute("/setup")).toBe(true);
     expect(isPublicAppRoute("/image")).toBe(false);
+    expect(isPublicAppRoute("/gallery")).toBe(false);
   });
 
   test("revokes the server JWT before clearing the local session on logout", () => {

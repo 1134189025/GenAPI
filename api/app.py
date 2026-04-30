@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import accounts, ai, register, system, update, user_management
+from api import accounts, ai, gallery, register, system, update, user_management
 from api.support import resolve_web_asset, start_image_cache_watcher, start_limited_account_watcher
 from services.config import config
 
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     app.include_router(ai.create_router())
+    app.include_router(gallery.create_router())
     app.include_router(accounts.create_router())
     app.include_router(register.create_router())
     app.include_router(system.create_router(app_version))

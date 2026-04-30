@@ -17,6 +17,9 @@ export type StoredImage = {
   id: string;
   status?: "loading" | "success" | "error";
   b64_json?: string;
+  serverId?: string;
+  url?: string;
+  expiresAt?: string;
   error?: string;
 };
 

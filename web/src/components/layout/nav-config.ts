@@ -41,6 +41,12 @@ const userNavigation: NavGroup[] = [
         icon: "brush",
       },
       {
+        href: "/gallery",
+        label: "图库",
+        description: "查看、下载和继续编辑已生成图片",
+        icon: "image",
+      },
+      {
         href: "/membership",
         label: "会员中心",
         description: "会员状态、套餐和周期额度",

@@ -104,3 +104,16 @@ export async function httpRequest<T>(path: string, options: RequestOptions = {})
     const response = await request.request<T>(config);
     return response.data;
 }
+
+export async function httpBlobRequest(path: string, options: Omit<RequestOptions, "body"> = {}) {
+    const {method = "GET", headers, redirectOnUnauthorized = true} = options;
+    const config: RequestConfig = {
+        url: path,
+        method,
+        headers,
+        redirectOnUnauthorized,
+        responseType: "blob",
+    };
+    const response = await request.request<Blob>(config);
+    return response.data;
+}

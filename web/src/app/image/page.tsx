@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { editImage, fetchAccounts, fetchMe, generateImage, type Account } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { AUTH_SESSION_BROADCAST_CHANNEL, getStoredAuthSession } from "@/store/auth";
+import { consumeImageEditHandoff } from "@/store/image-edit-handoff";
 import { getScopedImagePreferenceStorageKey } from "@/store/image-conversation-scope";
 import {
   clearImageConversations,
@@ -194,6 +195,7 @@ async function recoverConversationHistory(ownerId: string, items: ImageConversat
 
 function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; userId: string; sessionKey: string }) {
   const didLoadQuotaRef = useRef(false);
+  const didConsumeGalleryHandoffRef = useRef(false);
   const conversationsRef = useRef<ImageConversation[]>([]);
   const isImageQueueOwnerActiveRef = useRef(true);
   const resultsViewportRef = useRef<HTMLDivElement>(null);
@@ -325,6 +327,41 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
       cancelled = true;
     };
   }, [activeConversationStorageKey, imageSizeStorageKey, userId]);
+
+  useEffect(() => {
+    if (isLoadingHistory || didConsumeGalleryHandoffRef.current) {
+      return;
+    }
+    didConsumeGalleryHandoffRef.current = true;
+    let cancelled = false;
+
+    const consumeHandoff = async () => {
+      try {
+        const handoff = await consumeImageEditHandoff(userId);
+        if (!handoff || cancelled) {
+          return;
+        }
+        setSelectedConversationId(null);
+        setImageMode("edit");
+        setImagePrompt("");
+        setReferenceImages([handoff.image]);
+        setReferenceImageFiles([dataUrlToFile(handoff.image.dataUrl, handoff.image.name, handoff.image.type)]);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        textareaRef.current?.focus();
+        toast.success("已从图库加入参考图，继续输入描述即可编辑");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "读取图库参考图失败";
+        toast.error(message);
+      }
+    };
+
+    void consumeHandoff();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoadingHistory, userId]);
 
   const loadQuota = useCallback(async () => {
     if (!isAdmin) {
@@ -705,7 +742,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               break;
             }
             const first = data.data?.[0];
-            if (!first?.b64_json) {
+            if (!first?.b64_json && !first?.content_url && !first?.url) {
               throw new Error("未返回图片数据");
             }
 
@@ -713,6 +750,9 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               id: pendingImage.id,
               status: "success",
               b64_json: first.b64_json,
+              serverId: first.gallery_id,
+              url: first.content_url || first.url,
+              expiresAt: first.expires_at,
             };
 
             await updateConversation(
@@ -735,7 +775,6 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
                   ),
                 };
               },
-              { persist: false },
             );
 
             resumedSuccessCount += 1;

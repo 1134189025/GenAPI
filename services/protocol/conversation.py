@@ -156,6 +156,7 @@ def format_image_result(
     base_url: str | None = None,
     created: int | None = None,
     message: str = "",
+    save_public_images: bool = True,
 ) -> dict[str, Any]:
     data: list[dict[str, Any]] = []
     for item in items:
@@ -163,17 +164,22 @@ def format_image_result(
         if not b64_json:
             continue
         revised_prompt = str(item.get("revised_prompt") or prompt).strip() or prompt
+        image_data = base64.b64decode(b64_json)
         if response_format == "b64_json":
-            data.append({
+            result_item = {
                 "b64_json": b64_json,
-                "url": save_image_bytes(base64.b64decode(b64_json), base_url),
                 "revised_prompt": revised_prompt,
-            })
+            }
+            if save_public_images:
+                result_item["url"] = save_image_bytes(image_data, base_url)
+            data.append(result_item)
         else:
-            data.append({
-                "url": save_image_bytes(base64.b64decode(b64_json), base_url),
-                "revised_prompt": revised_prompt,
-            })
+            result_item = {"revised_prompt": revised_prompt}
+            if save_public_images:
+                result_item["url"] = save_image_bytes(image_data, base_url)
+            else:
+                result_item["b64_json"] = b64_json
+            data.append(result_item)
     result: dict[str, Any] = {"created": created or int(time.time()), "data": data}
     if message and not data:
         result["message"] = message
@@ -191,6 +197,7 @@ class ConversationRequest:
     response_format: str = "b64_json"
     base_url: str | None = None
     message_as_error: bool = False
+    save_public_images: bool = True
 
 
 @dataclass
@@ -523,6 +530,7 @@ def stream_image_outputs(
             request.response_format,
             request.base_url,
             int(time.time()),
+            save_public_images=request.save_public_images,
         )["data"]
         if data:
             yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data)
