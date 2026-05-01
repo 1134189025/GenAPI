@@ -151,6 +151,24 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertIn("GENAPI_DEPLOYMENT_MODE=docker", dockerfile)
         self.assertIn("GENAPI_BUILD_TYPE=docker", dockerfile)
 
+    def test_favicon_contains_multiple_browser_icon_sizes(self) -> None:
+        from PIL import Image
+
+        root_dir = Path(__file__).resolve().parents[1]
+        favicon = root_dir / "web" / "src" / "app" / "favicon.ico"
+
+        self.assertGreater(favicon.stat().st_size, 1024)
+        with Image.open(favicon) as image:
+            self.assertEqual(image.format, "ICO")
+            self.assertTrue({(16, 16), (32, 32), (48, 48), (256, 256)}.issubset(image.ico.sizes()))
+            image.seek(0)
+            preview = image.convert("RGBA").resize((256, 256))
+            red, green, blue, alpha = preview.getpixel((64, 64))
+            self.assertGreater(alpha, 200)
+            self.assertGreater(green, 80)
+            self.assertGreater(blue, 120)
+            self.assertLess(red, 120)
+
     def test_docker_build_context_excludes_runtime_secrets(self) -> None:
         root_dir = Path(__file__).resolve().parents[1]
         dockerignore = (root_dir / ".dockerignore").read_text(encoding="utf-8").splitlines()
