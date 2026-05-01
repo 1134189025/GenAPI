@@ -17,6 +17,8 @@ import {
 
 const DOCKER_MANUAL_UPDATE_COMMAND = "docker compose pull app && docker compose up -d app";
 const SOURCE_MANUAL_UPDATE_COMMAND = "git pull && restart service manually";
+const SYSTEMD_UPDATE_CONFIRMATION = "系统更新会下载并安装最新发布包，完成后可能需要重启服务。确认立即更新？";
+const DOCKER_UPDATE_CONFIRMATION = "容器更新会拉取最新镜像并重新创建容器，页面可能会短暂断开连接。确认立即更新？";
 
 type PillTone = "slate" | "emerald" | "amber" | "rose" | "blue";
 
@@ -63,15 +65,47 @@ export function isSystemdReleaseMode(status: UpdateStatus | undefined) {
   return ["systemd", "systemd-binary"].includes(getDeploymentMode(status)) && (status?.build_type ?? "source") === "release";
 }
 
+function isDockerMode(status: UpdateStatus | undefined) {
+  return getDeploymentMode(status) === "docker";
+}
+
+function isDockerWebUpdateMode(status: UpdateStatus | undefined) {
+  return isDockerMode(status) && status?.can_update === true && !status.disabled_reason && !status.error;
+}
+
+export function getUpdateActionAvailability(
+  status: UpdateStatus | undefined,
+  options: { busy?: boolean; needsRestart?: boolean } = {},
+) {
+  const busy = options.busy ?? false;
+  const needsRestart = options.needsRestart ?? false;
+  const systemdReleaseMode = isSystemdReleaseMode(status);
+  const webUpdateMode = systemdReleaseMode || isDockerWebUpdateMode(status);
+  const hasUpdate = hasAvailableSystemUpdate(status);
+  const canUpdate = Boolean(
+    webUpdateMode &&
+      hasUpdate &&
+      !needsRestart &&
+      !busy &&
+      (systemdReleaseMode ? status?.can_update !== false : status?.can_update === true),
+  );
+  const canRollback = Boolean(systemdReleaseMode && status?.can_update !== false && !busy);
+
+  return { canUpdate, canRollback, webUpdateMode };
+}
+
 export function getManualUpdateGuidance(status: UpdateStatus | undefined): ManualUpdateGuidance | null {
   if (!status || isSystemdReleaseMode(status)) return null;
 
-  if (getDeploymentMode(status) === "docker") {
-    return {
-      title: "容器部署需要手动更新",
-      description: "当前部署模式不通过网页执行器更新，请在部署目录运行以下命令。",
-      command: DOCKER_MANUAL_UPDATE_COMMAND,
-    };
+  if (isDockerMode(status)) {
+    if (!isDockerWebUpdateMode(status)) {
+      return {
+        title: "容器部署需要手动更新",
+        description: "当前部署模式不通过网页执行器更新，请在部署目录运行以下命令。",
+        command: DOCKER_MANUAL_UPDATE_COMMAND,
+      };
+    }
+    return null;
   }
 
   return {
@@ -92,8 +126,13 @@ export function getReleaseSyncState(status: UpdateStatus | undefined) {
   return { label: "未检测", tone: "amber" as const };
 }
 
-export function confirmSystemUpdateStart(confirm: (message: string) => boolean = window.confirm) {
-  return confirm("系统更新会下载并安装最新发布包，完成后可能需要重启服务。确认立即更新？");
+export function getSystemUpdateConfirmationMessage(status: UpdateStatus | undefined) {
+  if (isDockerMode(status)) return DOCKER_UPDATE_CONFIRMATION;
+  return SYSTEMD_UPDATE_CONFIRMATION;
+}
+
+export function confirmSystemUpdateStart(status: UpdateStatus | undefined, confirm: (message: string) => boolean = window.confirm) {
+  return confirm(getSystemUpdateConfirmationMessage(status));
 }
 
 function Pill({ children, tone = "slate" }: { children: React.ReactNode; tone?: PillTone }) {
@@ -124,10 +163,10 @@ export function UpdateCard() {
   const releaseUrl = getReleaseUrl(statusValue);
   const manualGuidance = getManualUpdateGuidance(statusValue);
   const systemdReleaseMode = isSystemdReleaseMode(statusValue);
+  const updateActions = getUpdateActionAvailability(statusValue, { busy: isUpdating || isRollingBack || isRestarting, needsRestart });
+  const { canUpdate, canRollback, webUpdateMode } = updateActions;
   const hasUpdate = hasAvailableSystemUpdate(statusValue);
   const busy = isUpdating || isRollingBack || isRestarting;
-  const canUpdate = Boolean(systemdReleaseMode && status?.can_update !== false && hasUpdate && !needsRestart && !busy);
-  const canRollback = Boolean(systemdReleaseMode && status?.can_update !== false && !busy);
 
   const releaseNotes = useMemo(() => String(status?.release_info?.body ?? "").trim(), [status?.release_info?.body]);
   const releaseAssets = status?.release_info?.assets ?? [];
@@ -136,13 +175,13 @@ export function UpdateCard() {
     if (!status) return "";
     if (status.error) return status.error;
     if (status.disabled_reason) return status.disabled_reason;
-    if (!systemdReleaseMode) return manualGuidance?.description ?? "";
+    if (!webUpdateMode) return manualGuidance?.description ?? "";
     if (status.can_update === false) return "当前部署暂不支持网页更新。";
     if (needsRestart) return "更新已安装，重启服务前不会再次执行更新。";
     if (!hasUpdate) return "当前已是最新版本，暂无可安装更新。";
     if (busy) return "更新操作正在执行，请等待当前操作完成。";
     return "";
-  }, [busy, hasUpdate, manualGuidance?.description, needsRestart, status, systemdReleaseMode]);
+  }, [busy, hasUpdate, manualGuidance?.description, needsRestart, status, webUpdateMode]);
 
   const loadStatus = async (force = false) => {
     if (force) {
@@ -168,7 +207,7 @@ export function UpdateCard() {
 
   const handleUpdate = async () => {
     if (!canUpdate) return;
-    if (!confirmSystemUpdateStart()) return;
+    if (!confirmSystemUpdateStart(statusValue)) return;
     setIsUpdating(true);
     try {
       const result = await performSystemUpdate();
@@ -234,7 +273,7 @@ export function UpdateCard() {
   return (
     <DataPanel
       title="版本更新中心"
-      description="面向 Genapi 0.1.8 的系统更新入口；systemd release 部署支持网页更新，其余部署显示手动步骤。"
+      description="面向 Genapi 0.1.9 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
       toolbar={
         <>
           <Button
@@ -246,7 +285,7 @@ export function UpdateCard() {
             {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             刷新
           </Button>
-          {systemdReleaseMode ? (
+          {webUpdateMode ? (
             <Button className="h-9 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800" disabled={!canUpdate} onClick={() => void handleUpdate()}>
               {isUpdating ? <LoaderCircle className="size-4 animate-spin" /> : <Rocket className="size-4" />}
               更新系统
@@ -277,9 +316,9 @@ export function UpdateCard() {
           <div className="rounded-2xl border border-stone-200 bg-white p-4">
             <div className="text-xs font-bold text-stone-500">运行模式</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Pill tone={systemdReleaseMode ? "emerald" : "amber"}>{getDeploymentModeLabel(statusValue)}</Pill>
+              <Pill tone={webUpdateMode ? "emerald" : "amber"}>{getDeploymentModeLabel(statusValue)}</Pill>
               <Pill>{status?.build_type ?? "source"}</Pill>
-              <Pill tone={status?.can_update === false ? "amber" : "emerald"}>{status?.can_update === false ? "手动更新" : "可网页更新"}</Pill>
+              <Pill tone={webUpdateMode ? "emerald" : "amber"}>{webUpdateMode ? "可网页更新" : "手动更新"}</Pill>
             </div>
           </div>
         </div>
@@ -356,24 +395,26 @@ export function UpdateCard() {
                 <h3 className="text-sm font-black">更新操作</h3>
                 <p className="mt-1 text-xs text-stone-400">发布包更新完成后会提示重启服务。</p>
               </div>
-              <Pill tone={systemdReleaseMode ? "emerald" : "amber"}>{systemdReleaseMode ? "网页更新" : "手动更新"}</Pill>
+              <Pill tone={webUpdateMode ? "emerald" : "amber"}>{webUpdateMode ? "网页更新" : "手动更新"}</Pill>
             </div>
 
-            {systemdReleaseMode ? (
-              <div className="grid gap-2 sm:grid-cols-2">
+            {webUpdateMode ? (
+              <div className={`grid gap-2 ${systemdReleaseMode ? "sm:grid-cols-2" : ""}`}>
                 <Button className="h-10 rounded-xl bg-white text-stone-950 hover:bg-stone-100" disabled={!canUpdate} onClick={() => void handleUpdate()}>
                   {isUpdating ? <LoaderCircle className="size-4 animate-spin" /> : <Rocket className="size-4" />}
                   更新系统
                 </Button>
-                <Button
-                  variant="outline"
-                  className="h-10 rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/15"
-                  disabled={!canRollback}
-                  onClick={() => void handleRollback()}
-                >
-                  {isRollingBack ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
-                  回滚
-                </Button>
+                {systemdReleaseMode ? (
+                  <Button
+                    variant="outline"
+                    className="h-10 rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/15"
+                    disabled={!canRollback}
+                    onClick={() => void handleRollback()}
+                  >
+                    {isRollingBack ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+                    回滚
+                  </Button>
+                ) : null}
               </div>
             ) : manualGuidance ? (
               <div className="space-y-2">
@@ -387,7 +428,7 @@ export function UpdateCard() {
                 {isRestarting ? <LoaderCircle className="size-4 animate-spin" /> : <Power className="size-4" />}
                 重启服务
               </Button>
-            ) : systemdReleaseMode ? (
+            ) : webUpdateMode ? (
               <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-stone-300">更新或回滚完成后，这里会显示重启服务按钮。</div>
             ) : null}
 

@@ -9,9 +9,10 @@ from fastapi.concurrency import run_in_threadpool
 from api.support import require_admin
 from services.config import DATA_DIR
 try:
-    from services.update_executor import BinaryUpdateExecutor
-except ImportError:  # Worker A supplies BinaryUpdateExecutor; keep imports stable while branches converge.
+    from services.update_executor import BinaryUpdateExecutor, DockerComposeUpdateExecutor
+except ImportError:
     BinaryUpdateExecutor = None
+    DockerComposeUpdateExecutor = None
 from services.update_service import UpdateJobStore, build_release_status, load_update_settings
 from utils.helper import redact_sensitive_text
 
@@ -47,18 +48,18 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/api/admin/system/update")
     async def update_system(authorization: str | None = Header(default=None)):
         identity = require_admin(authorization)
-        job = await _run_update(app_version, identity)
-        return {"message": "Update completed successfully. Restart is required.", "need_restart": True, "job": job}
+        result = await _run_update(app_version, identity)
+        return result
 
     @router.post("/api/admin/system/rollback")
     async def rollback_system(authorization: str | None = Header(default=None)):
         require_admin(authorization)
         settings = load_update_settings()
         executor = _create_executor(settings)
+        rollback = _required_executor_method(executor, "rollback")
         preflight = await run_in_threadpool(lambda: _executor_preflight(executor, allow_pending_current=True))
         if not preflight.get("ok"):
             raise HTTPException(status_code=400, detail={"error": "rollback preflight failed", "preflight": preflight})
-        rollback = _required_executor_method(executor, "rollback")
         await run_in_threadpool(rollback)
         return {"message": "Rollback completed successfully. Restart is required.", "need_restart": True}
 
@@ -67,18 +68,18 @@ def create_router(app_version: str) -> APIRouter:
         require_admin(authorization)
         settings = load_update_settings()
         executor = _create_executor(settings)
+        restart = _required_executor_method(executor, "restart")
         preflight = await run_in_threadpool(lambda: _executor_preflight(executor, allow_pending_current=True))
         if not preflight.get("ok"):
             raise HTTPException(status_code=400, detail={"error": "restart preflight failed", "preflight": preflight})
-        restart = _required_executor_method(executor, "restart")
         background_tasks.add_task(restart)
         return {"message": "Restart scheduled."}
 
     @router.post("/api/admin/update/start")
     async def start_update(authorization: str | None = Header(default=None)):
         identity = require_admin(authorization)
-        job = await _run_update(app_version, identity)
-        return {"job": job}
+        result = await _run_update(app_version, identity)
+        return {"job": result["job"]}
 
     @router.get("/api/admin/update/jobs/{job_id}")
     async def get_update_job(job_id: str, authorization: str | None = Header(default=None)):
@@ -121,7 +122,7 @@ async def _run_update(app_version: str, identity: dict[str, object]) -> dict[str
     job_id = str(job["id"])
     try:
         job = await run_in_threadpool(lambda: store.update(job_id, status="running"))
-        await run_in_threadpool(lambda: _perform_update(executor, job, status))
+        update_result = await run_in_threadpool(lambda: _perform_update(executor, job, status))
     except HTTPException:
         raise
     except Exception as exc:
@@ -129,7 +130,22 @@ async def _run_update(app_version: str, identity: dict[str, object]) -> dict[str
         await run_in_threadpool(lambda: store.update(job_id, status="failed", error=safe_error))
         raise HTTPException(status_code=500, detail={"error": safe_error}) from exc
 
-    return await run_in_threadpool(lambda: store.update(job_id, status="succeeded", error=""))
+    if isinstance(update_result, dict) and update_result.get("async"):
+        message = str(update_result.get("message") or "Docker update started.")
+        helper_container_id = str(update_result.get("container_id") or update_result.get("container") or "")
+        job_updates: dict[str, Any] = {
+            "status": "running",
+            "message": message,
+            "error": "",
+            "async_update": True,
+        }
+        if helper_container_id:
+            job_updates["helper_container_id"] = helper_container_id
+        job = await run_in_threadpool(lambda: store.update(job_id, **job_updates))
+        return {"message": message, "need_restart": bool(update_result.get("need_restart", False)), "job": job}
+
+    job = await run_in_threadpool(lambda: store.update(job_id, status="succeeded", error=""))
+    return {"message": "Update completed successfully. Restart is required.", "need_restart": True, "job": job}
 
 
 def _validate_update_status(status: dict[str, Any]) -> None:
@@ -148,6 +164,12 @@ def _validate_update_status(status: dict[str, Any]) -> None:
 
 
 def _create_executor(settings: object) -> object:
+    deployment_mode = str(getattr(settings, "deployment_mode", "") or "")
+    build_type = str(getattr(settings, "build_type", "") or "")
+    if deployment_mode == "docker" and build_type == "docker":
+        if DockerComposeUpdateExecutor is None:
+            raise HTTPException(status_code=400, detail={"error": "Docker updater is not available"})
+        return DockerComposeUpdateExecutor(DATA_DIR, settings)
     if BinaryUpdateExecutor is None:
         raise HTTPException(status_code=400, detail={"error": "binary updater is not available"})
     return BinaryUpdateExecutor(DATA_DIR, settings)
@@ -174,7 +196,13 @@ def _status_with_preflight(settings: object, status: dict[str, Any]) -> tuple[di
     preflight = _executor_preflight(_create_executor(settings), release_info=_release_info(status))
     next_status = dict(status)
     next_status["preflight"] = preflight
-    if next_status.get("can_update") and not preflight.get("ok"):
+    deployment_mode = str(getattr(settings, "deployment_mode", "") or "")
+    build_type = str(getattr(settings, "build_type", "") or "")
+    if deployment_mode == "docker" and build_type == "docker":
+        next_status["can_update"] = bool(next_status.get("update_available")) and bool(preflight.get("ok"))
+    if next_status.get("update_available") and not preflight.get("ok") and (
+        next_status.get("can_update") or (deployment_mode == "docker" and build_type == "docker")
+    ):
         next_status["can_update"] = False
         errors = [str(error) for error in preflight.get("errors", []) if str(error).strip()]
         next_status["disabled_reason"] = "; ".join(errors) or "update preflight failed"
@@ -216,7 +244,7 @@ def _release_info(status: dict[str, Any]) -> dict[str, Any]:
 def _required_executor_method(executor: object, name: str) -> Callable[..., Any]:
     method = getattr(executor, name, None)
     if not callable(method):
-        raise HTTPException(status_code=400, detail={"error": f"binary updater does not support {name}"})
+        raise HTTPException(status_code=400, detail={"error": f"updater does not support {name}"})
     return method
 
 

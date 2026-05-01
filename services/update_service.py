@@ -35,11 +35,13 @@ class UpdateSettings:
     deployment_mode: str = "source"
     build_type: str = "source"
     max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES
-    # Deprecated Docker updater fields kept so older call sites/tests can still
-    # instantiate the settings object while the update core moves to binaries.
+    # Docker compose updater fields are used only for container deployments.
     enabled: bool = True
     service: str = DEFAULT_SERVICE
     compose_dir: str = ""
+    compose_file: str = "docker-compose.yml"
+    host_compose_dir: str = ""
+    host_data_dir: str = ""
     helper_image: str = DEFAULT_HELPER_IMAGE
     health_url: str = ""
 
@@ -55,6 +57,9 @@ def load_update_settings() -> UpdateSettings:
         enabled=True,
         service=os.environ.get("GENAPI_UPDATE_SERVICE", DEFAULT_SERVICE),
         compose_dir=os.environ.get("GENAPI_UPDATE_COMPOSE_DIR", ""),
+        compose_file=os.environ.get("GENAPI_UPDATE_COMPOSE_FILE", "docker-compose.yml"),
+        host_compose_dir=os.environ.get("GENAPI_UPDATE_HOST_COMPOSE_DIR", ""),
+        host_data_dir=os.environ.get("GENAPI_UPDATE_HOST_DATA_DIR", ""),
         helper_image=os.environ.get("GENAPI_UPDATE_HELPER_IMAGE", DEFAULT_HELPER_IMAGE),
         health_url=os.environ.get("GENAPI_UPDATE_HEALTH_URL", ""),
     )
@@ -95,10 +100,15 @@ def build_release_status(
     checksum_asset = _find_checksum_asset(release_info)
     can_update = (
         update_available
-        and settings.deployment_mode == "systemd-binary"
-        and settings.build_type == "release"
-        and compatible_asset is not None
-        and checksum_asset is not None
+        and (
+            (
+                settings.deployment_mode == "systemd-binary"
+                and settings.build_type == "release"
+                and compatible_asset is not None
+                and checksum_asset is not None
+            )
+            or (settings.deployment_mode == "docker" and settings.build_type == "docker")
+        )
     )
 
     status = _base_release_status(current_version, settings, checked_at)
@@ -441,6 +451,12 @@ def _status_cache_key(current_version: str, settings: UpdateSettings) -> str:
             settings.repo,
             settings.deployment_mode,
             settings.build_type,
+            settings.service,
+            settings.compose_dir,
+            settings.compose_file,
+            settings.host_compose_dir,
+            settings.host_data_dir,
+            settings.helper_image,
             str(settings.timeout_seconds),
             str(settings.max_download_bytes),
         ]
@@ -463,6 +479,12 @@ def _base_release_status(current_version: str, settings: UpdateSettings, checked
         "has_update": False,
         "checked_at": checked_at,
         "repo": settings.repo,
+        "service": settings.service,
+        "compose_dir": settings.compose_dir,
+        "compose_file": settings.compose_file,
+        "host_compose_dir": settings.host_compose_dir,
+        "host_data_dir": settings.host_data_dir,
+        "helper_image": settings.helper_image,
     }
 
 

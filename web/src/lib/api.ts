@@ -382,6 +382,7 @@ export type UpdateStatus = {
   latest_tag?: string;
   release_info?: UpdateReleaseInfo;
   release_url?: string;
+  preflight?: UpdatePreflight;
   checked_at?: string;
   cached?: boolean;
   warning?: string;

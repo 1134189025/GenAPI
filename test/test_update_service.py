@@ -176,6 +176,41 @@ class UpdateServiceTests(unittest.TestCase):
         self.assertEqual(status["deployment_mode"], "source")
         self.assertNotIn("disabled_reason", status)
 
+    def test_release_status_allows_docker_update_without_binary_assets(self) -> None:
+        from services.update_service import UpdateSettings, build_release_status
+
+        def opener(request, timeout):
+            return FakeHTTPResponse(
+                {
+                    "tag_name": "v0.1.6",
+                    "html_url": "https://github.com/owner/project/releases/tag/v0.1.6",
+                    "assets": [],
+                }
+            )
+
+        status = build_release_status(
+            current_version="0.1.5",
+            settings=UpdateSettings(
+                repo="owner/project",
+                deployment_mode="docker",
+                build_type="docker",
+                compose_dir="/deploy",
+                compose_file="docker-compose.yml",
+                service="app",
+            ),
+            opener=opener,
+            force=True,
+        )
+
+        self.assertTrue(status["update_available"])
+        self.assertTrue(status["has_update"])
+        self.assertTrue(status["can_update"])
+        self.assertEqual(status["deployment_mode"], "docker")
+        self.assertEqual(status["build_type"], "docker")
+        self.assertEqual(status["compose_dir"], "/deploy")
+        self.assertEqual(status["compose_file"], "docker-compose.yml")
+        self.assertEqual(status["service"], "app")
+
     def test_release_status_uses_cache_until_force_refresh(self) -> None:
         from services.update_service import UpdateSettings, build_release_status
 

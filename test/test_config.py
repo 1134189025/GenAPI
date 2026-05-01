@@ -159,6 +159,19 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertIn("env_file:", compose)
         self.assertIn(".env", compose)
 
+    def test_default_compose_enables_docker_web_updates(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        compose = (root_dir / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("/var/run/docker.sock:/var/run/docker.sock", compose)
+        self.assertIn(".:/app/deployment:ro", compose)
+        self.assertIn("GENAPI_UPDATE_COMPOSE_DIR=/app/deployment", compose)
+        self.assertIn("GENAPI_UPDATE_COMPOSE_FILE=docker-compose.yml", compose)
+        self.assertIn("GENAPI_UPDATE_HOST_COMPOSE_DIR=${PWD}", compose)
+        self.assertIn("GENAPI_UPDATE_HOST_DATA_DIR=${PWD}/data", compose)
+        self.assertIn("GENAPI_UPDATE_SERVICE=app", compose)
+        self.assertIn("GENAPI_UPDATE_HELPER_IMAGE=docker:28-cli", compose)
+
     def test_dockerfile_uses_committed_frontend_lockfile(self) -> None:
         root_dir = Path(__file__).resolve().parents[1]
         dockerfile = (root_dir / "Dockerfile").read_text(encoding="utf-8")

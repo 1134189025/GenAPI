@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { confirmSystemUpdateStart, getManualUpdateGuidance, getReleaseSyncState } from "../src/app/settings/components/update-card";
+import {
+  confirmSystemUpdateStart,
+  getManualUpdateGuidance,
+  getReleaseSyncState,
+  getUpdateActionAvailability,
+} from "../src/app/settings/components/update-card";
 import { isSub2APIAuthModeChanged, validateSub2APIServerForm } from "../src/app/settings/components/sub2api-connections";
 import type { Sub2APIServer, UpdateStatus } from "../src/lib/api";
 
@@ -86,14 +91,107 @@ describe("settings UI helper contracts", () => {
     expect(getManualUpdateGuidance(systemdStatus)).toBeNull();
   });
 
+  test("docker deployment can start web update without enabling rollback", () => {
+    const dockerStatus: UpdateStatus = {
+      deployment_mode: "docker",
+      build_type: "release",
+      can_update: true,
+      has_update: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+    };
+    const dockerComposeStatus: UpdateStatus = {
+      mode: "docker-compose",
+      build_type: "release",
+      can_update: true,
+      update_available: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+    };
+
+    expect(getUpdateActionAvailability(dockerStatus)).toEqual({
+      canUpdate: true,
+      canRollback: false,
+      webUpdateMode: true,
+    });
+    expect(getManualUpdateGuidance(dockerStatus)).toBeNull();
+    expect(getUpdateActionAvailability(dockerComposeStatus).canUpdate).toBe(true);
+    expect(getUpdateActionAvailability({ ...dockerStatus, has_update: false, update_available: false }).canUpdate).toBe(false);
+    expect(getUpdateActionAvailability({ ...dockerStatus, can_update: false }).canUpdate).toBe(false);
+  });
+
+  test("systemd release update and rollback behavior is unchanged", () => {
+    const systemdStatus: UpdateStatus = {
+      deployment_mode: "systemd",
+      build_type: "release",
+      has_update: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+    };
+
+    expect(getUpdateActionAvailability(systemdStatus)).toEqual({
+      canUpdate: true,
+      canRollback: true,
+      webUpdateMode: true,
+    });
+    expect(getUpdateActionAvailability({ ...systemdStatus, has_update: false }).canUpdate).toBe(false);
+    expect(getUpdateActionAvailability({ ...systemdStatus, can_update: false })).toEqual({
+      canUpdate: false,
+      canRollback: false,
+      webUpdateMode: true,
+    });
+  });
+
+  test("docker preflight failures still show manual compose guidance", () => {
+    const dockerStatus: UpdateStatus = {
+      deployment_mode: "docker",
+      build_type: "release",
+      can_update: false,
+      has_update: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+      disabled_reason: "docker socket is unavailable",
+    };
+
+    expect(getManualUpdateGuidance(dockerStatus)?.command).toBe("docker compose pull app && docker compose up -d app");
+  });
+
   test("system update start requires explicit confirmation", () => {
     let confirmCalls = 0;
-    const confirm = () => {
+    const systemdStatus: UpdateStatus = {
+      deployment_mode: "systemd",
+      build_type: "release",
+      can_update: true,
+      has_update: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+    };
+    const confirm = (message: string) => {
       confirmCalls += 1;
+      expect(message).toBe("系统更新会下载并安装最新发布包，完成后可能需要重启服务。确认立即更新？");
       return false;
     };
 
-    expect(confirmSystemUpdateStart(confirm)).toBe(false);
+    expect(confirmSystemUpdateStart(systemdStatus, confirm)).toBe(false);
     expect(confirmCalls).toBe(1);
+  });
+
+  test("docker system update confirmation warns about container recreation", () => {
+    const dockerStatus: UpdateStatus = {
+      deployment_mode: "docker",
+      build_type: "release",
+      can_update: true,
+      update_available: true,
+      current_version: "0.1.5",
+      latest_version: "0.1.6",
+    };
+    const confirm = (message: string) => {
+      expect(message).toContain("容器");
+      expect(message).toContain("重新创建");
+      expect(message).toContain("短暂断开");
+      return false;
+    };
+
+    expect(confirmSystemUpdateStart(dockerStatus, confirm)).toBe(false);
   });
 });

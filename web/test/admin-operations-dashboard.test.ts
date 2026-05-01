@@ -52,6 +52,8 @@ describe("admin operations dashboard pages", () => {
     expect(updateCard).toContain("Release 说明");
     expect(updateCard).toContain("docker compose pull app && docker compose up -d app");
     expect(updateCard).toContain("git pull && restart service manually");
+    expect(updateCard).toContain("容器更新会拉取最新镜像并重新创建容器");
+    expect(updateCard).toContain("页面可能会短暂断开连接");
     expect(updateCard).toContain("checkSystemUpdates");
     expect(updateCard).toContain("performSystemUpdate");
     expect(updateCard).toContain("rollbackSystemUpdate");

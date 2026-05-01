@@ -245,6 +245,12 @@ cp .env.example .env
 - `GIT_REPO_URL`、`GIT_TOKEN`、`GIT_BRANCH`、`GIT_FILE_PATH`：Git 存储后端配置。
 - `GENAPI_DEPLOYMENT_MODE`：部署模式。systemd 二进制安装使用 `systemd-binary`，Docker 使用 `docker`，源码运行使用 `source`。
 - `GENAPI_BUILD_TYPE`：构建类型。GitHub Release 二进制使用 `release`，Docker 镜像使用 `docker`，源码运行使用 `source`。
+- `GENAPI_UPDATE_COMPOSE_DIR`：Docker 网页更新使用的 compose 目录。官方 `docker-compose.yml` 默认挂载到 `/app/deployment`。
+- `GENAPI_UPDATE_COMPOSE_FILE`：Docker 网页更新使用的 compose 文件名，官方默认 `docker-compose.yml`。
+- `GENAPI_UPDATE_HOST_COMPOSE_DIR`：宿主机上的 compose 目录，helper 容器会用它挂载部署文件。官方 compose 默认使用 `${PWD}`。
+- `GENAPI_UPDATE_HOST_DATA_DIR`：宿主机上的 `data` 目录，helper 容器会用它写入更新任务日志。官方 compose 默认使用 `${PWD}/data`。
+- `GENAPI_UPDATE_SERVICE`：Docker 网页更新要重建的服务名，官方默认 `app`。
+- `GENAPI_UPDATE_HELPER_IMAGE`：Docker 网页更新使用的 Docker CLI 辅助镜像，官方默认 `docker:28-cli`。
 - `GENAPI_DATA_DIR`：运行时数据目录。systemd 二进制安装默认使用 `/opt/genapi/data`。
 - `GITHUB_TOKEN`：可选。用于访问 GitHub Releases API，避免匿名请求限流。
 
@@ -264,7 +270,9 @@ cp .env.example .env
 
 ## 网页更新中心
 
-网页一键更新只支持 systemd 二进制部署。该模式和 sub2api 一样：更新中心检查 GitHub Releases，下载当前系统架构对应的 `genapi_*_linux_*.tar.gz`，校验 `checksums.txt`，并把 `genapi`、`VERSION`、`web_dist` 作为同一组 release 资产安装到 `/opt/genapi/app/releases/`。运行入口是 `/opt/genapi/app/current` symlink，更新时会先准备完整新目录，再原子切换 `current`，旧版本保留在 `/opt/genapi/app/previous` 供网页回滚。安装脚本升级时会把完整旧版本备份到 `/var/backups/genapi`，回滚前同样会校验压缩包结构。更新完成后，网页会提示重启；重启通过退出进程触发 systemd 的 `Restart=always` 自动拉起。
+网页更新中心支持 systemd 二进制部署和官方 Docker Compose 部署。
+
+systemd 二进制模式和 sub2api 一样：更新中心检查 GitHub Releases，下载当前系统架构对应的 `genapi_*_linux_*.tar.gz`，校验 `checksums.txt`，并把 `genapi`、`VERSION`、`web_dist` 作为同一组 release 资产安装到 `/opt/genapi/app/releases/`。运行入口是 `/opt/genapi/app/current` symlink，更新时会先准备完整新目录，再原子切换 `current`，旧版本保留在 `/opt/genapi/app/previous` 供网页回滚。安装脚本升级时会把完整旧版本备份到 `/var/backups/genapi`，回滚前同样会校验压缩包结构。更新完成后，网页会提示重启；重启通过退出进程触发 systemd 的 `Restart=always` 自动拉起。
 
 推荐使用安装脚本部署：
 
@@ -282,9 +290,23 @@ Environment=GENAPI_HOST=0.0.0.0
 Environment=GENAPI_PORT=3000
 ```
 
-Docker 和源码部署仍会显示版本检查结果，但网页不会执行一键更新。Docker 部署请继续使用手动 `docker compose pull app && docker compose up -d app`；源码部署请手动 `git pull` 后重启服务。
+官方 `docker-compose.yml` 默认启用 Docker 网页更新：容器会挂载 `/var/run/docker.sock`，并把部署 compose 目录只读挂载到 `/app/deployment`。更新中心会使用 `GENAPI_UPDATE_COMPOSE_DIR=/app/deployment`、`GENAPI_UPDATE_HOST_COMPOSE_DIR=${PWD}`、`GENAPI_UPDATE_HOST_DATA_DIR=${PWD}/data`、`GENAPI_UPDATE_COMPOSE_FILE=docker-compose.yml`、`GENAPI_UPDATE_SERVICE=app` 和 `GENAPI_UPDATE_HELPER_IMAGE=docker:28-cli` 启动 Docker CLI helper 容器，拉取新镜像并重建 `app` 服务。
 
-如果网页更新后服务无法启动，可以通过 SSH 手动恢复上一版：
+挂载 Docker socket 允许 Genapi 容器控制宿主机 Docker daemon，包括启动、停止和替换容器，也可能通过 Docker 获得宿主机高权限。只应在可信服务器上启用，并确保管理员账号、反向代理和访问控制安全。如果不能接受该权限，请移除 `/var/run/docker.sock` 和 compose 目录挂载，删除 `GENAPI_UPDATE_*` Docker 更新变量，并继续使用手动 Docker 更新。
+
+从旧版 Docker 容器首次升级到支持网页更新的版本时，旧容器还没有 Docker socket 和 compose 目录挂载，因此仍需在服务器上手动执行一次更新，让新 compose 配置生效：
+
+```bash
+git pull  # 或手动同步最新 docker-compose.yml
+docker compose pull app
+docker compose up -d app
+```
+
+后续 Docker 镜像更新可以在网页更新中心触发。源码部署仍只显示版本检查结果，请手动 `git pull` 后重启服务。
+
+Docker 网页回滚在本 release 中仍未启用；Docker 回滚仍按下方“手动更新与恢复”中的命令手动执行。
+
+如果 systemd 二进制网页更新后服务无法启动，可以通过 SSH 手动恢复上一版：
 
 ```bash
 sudo ln -sfn "$(readlink -f /opt/genapi/app/previous)" /opt/genapi/app/current
@@ -313,7 +335,7 @@ docker compose up -d app
 docker compose ps app
 ```
 
-如果应用镜像需要回滚，先选择要回滚到的旧镜像标签或镜像 digest，然后只覆盖应用服务镜像：
+Docker 回滚在本 release 中仍需要手动执行。如果应用镜像需要回滚，先选择要回滚到的旧镜像标签或镜像 digest，然后只覆盖应用服务镜像：
 
 ```bash
 PREVIOUS_IMAGE=ghcr.io/1134189025/genapi:0.1.3

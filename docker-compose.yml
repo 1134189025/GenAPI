@@ -10,14 +10,21 @@ services:
         required: false
     volumes:
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app/deployment:ro
     environment:
       # 存储后端配置 (可选值: json, sqlite, postgres, git)
       - STORAGE_BACKEND=json
 
-      # Docker 部署会显示版本检查，但不支持网页一键更新。
-      # 网页一键更新仅支持 deploy/install.sh 安装的 systemd 二进制模式。
+      # Docker 部署网页更新配置：通过 Docker socket 更新 app 服务镜像。
       - GENAPI_DEPLOYMENT_MODE=docker
       - GENAPI_BUILD_TYPE=docker
+      - GENAPI_UPDATE_COMPOSE_DIR=/app/deployment
+      - GENAPI_UPDATE_COMPOSE_FILE=docker-compose.yml
+      - GENAPI_UPDATE_HOST_COMPOSE_DIR=${PWD}
+      - GENAPI_UPDATE_HOST_DATA_DIR=${PWD}/data
+      - GENAPI_UPDATE_SERVICE=app
+      - GENAPI_UPDATE_HELPER_IMAGE=docker:28-cli
       # 可选：用于访问 GitHub Releases API，避免匿名请求限流。
       # - GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 

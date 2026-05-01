@@ -19,11 +19,15 @@ class UpdateAPITests(unittest.TestCase):
         self.old_jwt_secret = os.environ.get("JWT_SECRET")
         self.old_enable_updater = os.environ.get("GENAPI_ENABLE_WEB_UPDATER")
         self.old_compose_dir = os.environ.get("GENAPI_UPDATE_COMPOSE_DIR")
+        self.old_deployment_mode = os.environ.get("GENAPI_DEPLOYMENT_MODE")
+        self.old_build_type = os.environ.get("GENAPI_BUILD_TYPE")
         os.environ["GENAPI_CONFIG_FILE"] = str(base / "config.json")
         os.environ["GENAPI_USER_DATABASE_URL"] = f"sqlite:///{base / 'users.db'}"
         os.environ["JWT_SECRET"] = "unit-test-secret-with-at-least-32-bytes"
         os.environ["GENAPI_ENABLE_WEB_UPDATER"] = "true"
         os.environ["GENAPI_UPDATE_COMPOSE_DIR"] = str(base)
+        os.environ["GENAPI_DEPLOYMENT_MODE"] = "systemd-binary"
+        os.environ["GENAPI_BUILD_TYPE"] = "release"
         (base / "docker-compose.yml").write_text("services:\n  app:\n    image: genapi:test\n", encoding="utf-8")
         self._clear_modules()
         app_module = importlib.import_module("api.app")
@@ -49,6 +53,8 @@ class UpdateAPITests(unittest.TestCase):
         self._restore_env("JWT_SECRET", self.old_jwt_secret)
         self._restore_env("GENAPI_ENABLE_WEB_UPDATER", self.old_enable_updater)
         self._restore_env("GENAPI_UPDATE_COMPOSE_DIR", self.old_compose_dir)
+        self._restore_env("GENAPI_DEPLOYMENT_MODE", self.old_deployment_mode)
+        self._restore_env("GENAPI_BUILD_TYPE", self.old_build_type)
         self._clear_modules()
         self.tmp.cleanup()
 
@@ -176,6 +182,53 @@ class UpdateAPITests(unittest.TestCase):
         self.assertFalse(payload["can_update"])
         self.assertIn("binary directory is not writable", payload["disabled_reason"])
 
+    def test_check_updates_enables_docker_can_update_only_after_preflight_ok(self) -> None:
+        update_module = sys.modules["api.update"]
+
+        class FakeDockerExecutor:
+            def __init__(self, data_dir, settings):
+                self.data_dir = data_dir
+                self.settings = settings
+
+            def preflight(self, release_info=None):
+                return {"ok": True, "errors": [], "warnings": []}
+
+        original_build_status = update_module.build_release_status
+        original_docker_executor = getattr(update_module, "DockerComposeUpdateExecutor", None)
+        old_mode = os.environ.get("GENAPI_DEPLOYMENT_MODE")
+        old_build = os.environ.get("GENAPI_BUILD_TYPE")
+        try:
+            os.environ["GENAPI_DEPLOYMENT_MODE"] = "docker"
+            os.environ["GENAPI_BUILD_TYPE"] = "docker"
+            update_module.build_release_status = lambda **kwargs: {
+                "enabled": True,
+                "can_update": False,
+                "mode": "docker",
+                "deployment_mode": "docker",
+                "build_type": "docker",
+                "current_version": "0.1.5",
+                "latest_version": "0.1.6",
+                "latest_tag": "v0.1.6",
+                "release_url": "https://github.com/owner/project/releases/tag/v0.1.6",
+                "release_info": {"assets": []},
+                "update_available": True,
+            }
+            update_module.DockerComposeUpdateExecutor = FakeDockerExecutor
+            response = self.client.get("/api/admin/system/check-updates", headers=self.headers)
+        finally:
+            update_module.build_release_status = original_build_status
+            if original_docker_executor is None:
+                delattr(update_module, "DockerComposeUpdateExecutor")
+            else:
+                update_module.DockerComposeUpdateExecutor = original_docker_executor
+            self._restore_env("GENAPI_DEPLOYMENT_MODE", old_mode)
+            self._restore_env("GENAPI_BUILD_TYPE", old_build)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["can_update"])
+        self.assertTrue(payload["preflight"]["ok"])
+
     def test_system_update_creates_job_invokes_executor_and_legacy_start_wraps_job(self) -> None:
         update_module = sys.modules["api.update"]
         performed: list[dict[str, object]] = []
@@ -268,6 +321,68 @@ class UpdateAPITests(unittest.TestCase):
         self.assertEqual(captured["target_tag"], "v0.1.6")
         self.assertEqual(captured["target_version"], "0.1.6")
         self.assertEqual(captured["release_info"], release_info)
+
+    def test_docker_system_update_starts_async_job_without_restart(self) -> None:
+        update_module = sys.modules["api.update"]
+        performed: list[dict[str, object]] = []
+
+        class FakeDockerExecutor:
+            def __init__(self, data_dir, settings):
+                self.data_dir = data_dir
+                self.settings = settings
+
+            def preflight(self, release_info=None):
+                return {"ok": True, "errors": [], "warnings": []}
+
+            def perform_update(self, **kwargs):
+                performed.append(kwargs)
+                return {
+                    "ok": True,
+                    "async": True,
+                    "need_restart": False,
+                    "message": "Docker update started",
+                    "container_id": "helper-123",
+                }
+
+        original_build_status = update_module.build_release_status
+        original_docker_executor = getattr(update_module, "DockerComposeUpdateExecutor", None)
+        old_mode = os.environ.get("GENAPI_DEPLOYMENT_MODE")
+        old_build = os.environ.get("GENAPI_BUILD_TYPE")
+        try:
+            os.environ["GENAPI_DEPLOYMENT_MODE"] = "docker"
+            os.environ["GENAPI_BUILD_TYPE"] = "docker"
+            update_module.build_release_status = lambda **kwargs: {
+                "enabled": True,
+                "can_update": True,
+                "mode": "docker",
+                "deployment_mode": "docker",
+                "build_type": "docker",
+                "current_version": "0.1.5",
+                "latest_version": "0.1.6",
+                "latest_tag": "v0.1.6",
+                "release_url": "https://github.com/owner/project/releases/tag/v0.1.6",
+                "release_info": {"assets": []},
+                "update_available": True,
+            }
+            update_module.DockerComposeUpdateExecutor = FakeDockerExecutor
+            response = self.client.post("/api/admin/system/update", headers=self.headers)
+        finally:
+            update_module.build_release_status = original_build_status
+            if original_docker_executor is None:
+                delattr(update_module, "DockerComposeUpdateExecutor")
+            else:
+                update_module.DockerComposeUpdateExecutor = original_docker_executor
+            self._restore_env("GENAPI_DEPLOYMENT_MODE", old_mode)
+            self._restore_env("GENAPI_BUILD_TYPE", old_build)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertFalse(payload["need_restart"])
+        self.assertEqual(payload["message"], "Docker update started")
+        self.assertEqual(payload["job"]["status"], "running")
+        self.assertTrue(payload["job"]["async_update"])
+        self.assertEqual(payload["job"]["helper_container_id"], "helper-123")
+        self.assertEqual(performed[0]["target_tag"], "v0.1.6")
 
     def test_system_update_rejects_no_update_preflight_failure_and_active_job(self) -> None:
         update_module = sys.modules["api.update"]
@@ -366,6 +481,39 @@ class UpdateAPITests(unittest.TestCase):
         self.assertTrue(rollback_response.json()["need_restart"])
         self.assertEqual(restart_response.status_code, 200, restart_response.text)
         self.assertEqual(calls, ["preflight:True", "rollback", "preflight:True", "restart"])
+
+    def test_docker_rollback_is_not_supported_in_v1(self) -> None:
+        update_module = sys.modules["api.update"]
+        calls: list[str] = []
+
+        class FakeDockerExecutor:
+            def __init__(self, data_dir, settings):
+                self.data_dir = data_dir
+                self.settings = settings
+
+            def preflight(self, allow_pending_current=False):
+                calls.append("preflight")
+                return {"ok": True, "errors": [], "warnings": []}
+
+        original_docker_executor = getattr(update_module, "DockerComposeUpdateExecutor", None)
+        old_mode = os.environ.get("GENAPI_DEPLOYMENT_MODE")
+        old_build = os.environ.get("GENAPI_BUILD_TYPE")
+        try:
+            os.environ["GENAPI_DEPLOYMENT_MODE"] = "docker"
+            os.environ["GENAPI_BUILD_TYPE"] = "docker"
+            update_module.DockerComposeUpdateExecutor = FakeDockerExecutor
+            rollback_response = self.client.post("/api/admin/system/rollback", headers=self.headers)
+        finally:
+            if original_docker_executor is None:
+                delattr(update_module, "DockerComposeUpdateExecutor")
+            else:
+                update_module.DockerComposeUpdateExecutor = original_docker_executor
+            self._restore_env("GENAPI_DEPLOYMENT_MODE", old_mode)
+            self._restore_env("GENAPI_BUILD_TYPE", old_build)
+
+        self.assertEqual(rollback_response.status_code, 400, rollback_response.text)
+        self.assertIn("updater does not support rollback", rollback_response.text)
+        self.assertEqual(calls, [])
 
     def test_system_rollback_and_restart_reject_failed_preflight(self) -> None:
         update_module = sys.modules["api.update"]

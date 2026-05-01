@@ -412,10 +412,258 @@ class UpdateExecutorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(exit_codes, [0])
 
-    def test_docker_update_executor_name_remains_as_compatibility_alias(self) -> None:
-        from services.update_executor import BinaryUpdateExecutor, DockerUpdateExecutor
+    def test_docker_compose_preflight_validates_runtime_contract(self) -> None:
+        from services.update_executor import DockerComposeUpdateExecutor
+        from services.update_service import UpdateSettings
 
-        self.assertIs(DockerUpdateExecutor, BinaryUpdateExecutor)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            compose_dir = base / "deploy"
+            compose_dir.mkdir()
+            (compose_dir / "docker-compose.yml").write_text("services:\n  app:\n    image: genapi:test\n", encoding="utf-8")
+            data_dir = base / "data"
+            data_dir.mkdir()
+            socket_path = base / "docker.sock"
+            socket_path.touch()
+
+            ok = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            bad_mode = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="source",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            bad_build = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="source",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            bad_service = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app;rm",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            missing_compose_dir = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir="",
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            missing_compose = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="missing.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+            daemon_down = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(ping_error=RuntimeError("no daemon")),
+                socket_path=socket_path,
+            ).preflight()
+
+            missing_host_paths = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    service="app",
+                ),
+                docker_client_factory=lambda: FakeDockerClient(),
+                socket_path=socket_path,
+            ).preflight()
+
+        self.assertTrue(ok["ok"], ok)
+        self.assertFalse(bad_mode["ok"])
+        self.assertTrue(any("GENAPI_DEPLOYMENT_MODE" in error for error in bad_mode["errors"]))
+        self.assertFalse(bad_build["ok"])
+        self.assertTrue(any("GENAPI_BUILD_TYPE" in error for error in bad_build["errors"]))
+        self.assertFalse(bad_service["ok"])
+        self.assertTrue(any("GENAPI_UPDATE_SERVICE" in error for error in bad_service["errors"]))
+        self.assertFalse(missing_compose_dir["ok"])
+        self.assertTrue(any("GENAPI_UPDATE_COMPOSE_DIR" in error for error in missing_compose_dir["errors"]))
+        self.assertFalse(missing_compose["ok"])
+        self.assertTrue(any("compose file" in error for error in missing_compose["errors"]))
+        self.assertFalse(daemon_down["ok"])
+        self.assertTrue(any("Docker daemon" in error for error in daemon_down["errors"]))
+        self.assertFalse(missing_host_paths["ok"])
+        self.assertTrue(any("GENAPI_UPDATE_HOST_COMPOSE_DIR" in error for error in missing_host_paths["errors"]))
+        self.assertTrue(any("GENAPI_UPDATE_HOST_DATA_DIR" in error for error in missing_host_paths["errors"]))
+
+    def test_docker_compose_update_starts_detached_helper_container(self) -> None:
+        from services.update_executor import DockerComposeUpdateExecutor, DockerUpdateExecutor
+        from services.update_service import UpdateSettings
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            compose_dir = base / "deploy"
+            compose_dir.mkdir()
+            data_dir = base / "data"
+            data_dir.mkdir()
+            (compose_dir / "docker-compose.yml").write_text("services:\n  app:\n    image: genapi:test\n", encoding="utf-8")
+            socket_path = base / "docker.sock"
+            socket_path.touch()
+            fake_client = FakeDockerClient()
+            executor = DockerComposeUpdateExecutor(
+                data_dir=base / "data",
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(compose_dir),
+                    compose_file="docker-compose.yml",
+                    host_compose_dir=str(compose_dir),
+                    host_data_dir=str(data_dir),
+                    service="app",
+                    helper_image="docker:28-cli",
+                ),
+                docker_client_factory=lambda: fake_client,
+                socket_path=socket_path,
+            )
+
+            result = executor.perform_update(
+                job_id="job-123",
+                target_tag="v0.1.6",
+                target_version="0.1.6",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.6",
+            )
+
+            run_call = fake_client.containers.run_calls[0]
+            script = (base / "data" / "update-jobs" / "job-123" / "docker-compose-update.sh").read_text(encoding="utf-8")
+
+        self.assertIs(DockerUpdateExecutor, DockerComposeUpdateExecutor)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["async"])
+        self.assertFalse(result["need_restart"])
+        self.assertEqual(result["container_id"], "helper-container-id")
+        self.assertEqual(run_call["image"], "docker:28-cli")
+        self.assertEqual(run_call["command"], ["sh", "/job/docker-compose-update.sh"])
+        self.assertTrue(run_call["detach"])
+        self.assertIn(str(socket_path), run_call["volumes"])
+        self.assertEqual(run_call["volumes"][str(socket_path)]["bind"], "/var/run/docker.sock")
+        self.assertEqual(run_call["volumes"][str(compose_dir)]["bind"], str(compose_dir))
+        self.assertEqual(run_call["working_dir"], str(compose_dir))
+        self.assertIn(f"docker compose -f {compose_dir}/docker-compose.yml pull app", script)
+        self.assertIn(f"docker compose -f {compose_dir}/docker-compose.yml up -d app", script)
+
+    def test_docker_compose_update_uses_configured_host_paths_for_helper_mounts(self) -> None:
+        from services.update_executor import DockerComposeUpdateExecutor
+        from services.update_service import UpdateSettings
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            container_compose_dir = base / "container" / "deployment"
+            container_data_dir = base / "container" / "data"
+            host_compose_dir = base / "host" / "deployment"
+            host_data_dir = base / "host" / "data"
+            for path in (container_compose_dir, container_data_dir, host_compose_dir, host_data_dir):
+                path.mkdir(parents=True)
+            (container_compose_dir / "docker-compose.yml").write_text("services:\n  app:\n    image: genapi:test\n", encoding="utf-8")
+            socket_path = base / "docker.sock"
+            socket_path.touch()
+            fake_client = FakeDockerClient()
+
+            executor = DockerComposeUpdateExecutor(
+                data_dir=container_data_dir,
+                settings=UpdateSettings(
+                    deployment_mode="docker",
+                    build_type="docker",
+                    compose_dir=str(container_compose_dir),
+                    compose_file="docker-compose.yml",
+                    service="app",
+                    host_compose_dir=str(host_compose_dir),
+                    host_data_dir=str(host_data_dir),
+                ),
+                docker_client_factory=lambda: fake_client,
+                socket_path=socket_path,
+            )
+
+            result = executor.perform_update(
+                job_id="job-123",
+                target_tag="v0.1.6",
+                target_version="0.1.6",
+                release_url="https://github.com/owner/project/releases/tag/v0.1.6",
+            )
+
+            run_call = fake_client.containers.run_calls[0]
+
+        self.assertTrue(result["ok"])
+        self.assertIn(str(host_compose_dir), run_call["volumes"])
+        self.assertIn(str(host_data_dir / "update-jobs" / "job-123"), run_call["volumes"])
+        self.assertEqual(run_call["volumes"][str(host_compose_dir)]["bind"], str(host_compose_dir))
+        self.assertEqual(run_call["working_dir"], str(host_compose_dir))
+        self.assertNotIn(str(container_compose_dir), run_call["volumes"])
+        self.assertNotIn(str(container_data_dir / "update-jobs" / "job-123"), run_call["volumes"])
 
 
 def _runtime_marker() -> str:
@@ -423,6 +671,30 @@ def _runtime_marker() -> str:
     if machine in {"aarch64", "arm64"}:
         return "linux_arm64"
     return "linux_amd64"
+
+
+class FakeContainers:
+    def __init__(self):
+        self.run_calls: list[dict[str, object]] = []
+
+    def run(self, **kwargs):
+        self.run_calls.append(kwargs)
+        return {"id": "helper-container-id"}
+
+
+class FakeDockerClient:
+    def __init__(self, ping_error: Exception | None = None):
+        self.ping_error = ping_error
+        self.containers = FakeContainers()
+        self.closed = False
+
+    def ping(self):
+        if self.ping_error is not None:
+            raise self.ping_error
+        return True
+
+    def close(self):
+        self.closed = True
 
 
 def _asset(prefix: str, content: bytes, url: str | None = None) -> dict[str, object]:

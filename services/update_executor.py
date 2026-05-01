@@ -9,6 +9,7 @@ import os
 import platform
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import shutil
 import sys
 import tarfile
@@ -24,6 +25,8 @@ ExitFunc = Callable[[int], Any]
 ALLOWED_DOWNLOAD_HOSTS = ("github.com", "objects.githubusercontent.com")
 BINARY_NAMES = {"genapi", "genapi.exe"}
 CHECKSUM_RE = re.compile(r"^[a-fA-F0-9]{64}$")
+DOCKER_SERVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+DOCKER_COMPOSE_FILE_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
 
 @dataclass(frozen=True)
@@ -502,6 +505,250 @@ class BinaryUpdateExecutor:
             log.write(f"{payload['updated_at']} {message}\n")
 
 
+class DockerComposeUpdateExecutor:
+    def __init__(
+        self,
+        data_dir: Path | str,
+        settings: Any,
+        docker_client_factory: Any | None = None,
+        socket_path: Path | str = "/var/run/docker.sock",
+    ) -> None:
+        self.data_dir = Path(data_dir)
+        self.settings = settings
+        self._docker_client_factory = docker_client_factory
+        self._socket_path = Path(socket_path)
+
+    def preflight(self, release_info: dict[str, Any] | None = None, allow_pending_current: bool = False) -> dict[str, object]:
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        deployment_mode = str(getattr(self.settings, "deployment_mode", "") or "")
+        if deployment_mode != "docker":
+            errors.append("GENAPI_DEPLOYMENT_MODE must be docker for Docker compose updates.")
+
+        build_type = str(getattr(self.settings, "build_type", "") or "")
+        if build_type != "docker":
+            errors.append("GENAPI_BUILD_TYPE must be docker for Docker compose updates.")
+
+        service = self._service_name()
+        if not DOCKER_SERVICE_RE.fullmatch(service):
+            errors.append("GENAPI_UPDATE_SERVICE must match [A-Za-z0-9_.-]+.")
+
+        compose_file = self._compose_file()
+        raw_compose_dir = self._compose_dir_value()
+        compose_dir = self._compose_dir()
+        if not raw_compose_dir:
+            errors.append("GENAPI_UPDATE_COMPOSE_DIR must be set for Docker compose updates.")
+        elif not compose_dir.exists():
+            errors.append(f"GENAPI_UPDATE_COMPOSE_DIR does not exist: {compose_dir}")
+        elif not compose_dir.is_dir():
+            errors.append(f"GENAPI_UPDATE_COMPOSE_DIR is not a directory: {compose_dir}")
+        elif not (compose_dir / compose_file).is_file():
+            errors.append(f"Docker compose file does not exist: {compose_dir / compose_file}")
+
+        if not self._valid_compose_file(compose_file):
+            errors.append("GENAPI_UPDATE_COMPOSE_FILE must be a relative compose file path without '..'.")
+
+        host_compose_dir = self._host_compose_dir_value()
+        if not host_compose_dir:
+            errors.append("GENAPI_UPDATE_HOST_COMPOSE_DIR must be set for Docker compose updates.")
+        elif not Path(host_compose_dir).is_absolute():
+            errors.append("GENAPI_UPDATE_HOST_COMPOSE_DIR must be an absolute host path.")
+
+        host_data_dir = self._host_data_dir_value()
+        if not host_data_dir:
+            errors.append("GENAPI_UPDATE_HOST_DATA_DIR must be set for Docker compose updates.")
+        elif not Path(host_data_dir).is_absolute():
+            errors.append("GENAPI_UPDATE_HOST_DATA_DIR must be an absolute host path.")
+
+        helper_image = self._helper_image()
+        if not helper_image:
+            errors.append("GENAPI_UPDATE_HELPER_IMAGE must be set for Docker compose updates.")
+
+        if not self._socket_path.exists():
+            errors.append(f"Docker socket is not mounted: {self._socket_path}")
+        elif not os.access(self._socket_path, os.R_OK | os.W_OK):
+            errors.append(f"Docker socket is not readable and writable: {self._socket_path}")
+
+        if not errors:
+            client = None
+            try:
+                client = self._docker_client()
+                client.ping()
+            except Exception as exc:
+                errors.append(f"Docker daemon is not reachable: {exc}")
+            finally:
+                self._close_client(client)
+
+        return {"ok": not errors, "errors": errors, "warnings": warnings}
+
+    def perform_update(
+        self,
+        *,
+        job_id: str,
+        target_tag: str,
+        target_version: str,
+        release_url: str,
+        **_: Any,
+    ) -> dict[str, Any]:
+        preflight = self.preflight()
+        if not preflight.get("ok"):
+            raise RuntimeError("update preflight failed: " + "; ".join(str(error) for error in preflight["errors"]))
+
+        job_dir = self.data_dir / "update-jobs" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        script_path = job_dir / "docker-compose-update.sh"
+        service = self._service_name()
+        compose_file = self._compose_file()
+        helper_project_dir = self._helper_compose_project_dir()
+        helper_job_dir = self._helper_job_source_dir(job_id)
+        script_path.write_text(
+            self._helper_script(
+                service=service,
+                compose_file=compose_file,
+                project_dir=helper_project_dir,
+                target_tag=target_tag,
+                target_version=target_version,
+                release_url=release_url,
+            ),
+            encoding="utf-8",
+        )
+        script_path.chmod(0o700)
+
+        client = None
+        try:
+            client = self._docker_client()
+            container = client.containers.run(
+                image=self._helper_image(),
+                command=["sh", "/job/docker-compose-update.sh"],
+                detach=True,
+                remove=True,
+                name=f"genapi-update-{_safe_container_suffix(job_id)}",
+                volumes={
+                    str(self._socket_path): {"bind": "/var/run/docker.sock", "mode": "rw"},
+                    str(helper_project_dir): {"bind": str(helper_project_dir), "mode": "ro"},
+                    str(helper_job_dir): {"bind": "/job", "mode": "rw"},
+                },
+                working_dir=str(helper_project_dir),
+            )
+        finally:
+            self._close_client(client)
+
+        container_id = _docker_container_id(container)
+        return {
+            "ok": True,
+            "async": True,
+            "need_restart": False,
+            "message": "Docker update started. The application container will be recreated shortly.",
+            "container": container_id or str(container),
+            "container_id": container_id,
+            "target_tag": target_tag,
+            "target_version": target_version,
+        }
+
+    def _docker_client(self) -> Any:
+        if self._docker_client_factory is not None:
+            return self._docker_client_factory()
+        import docker
+
+        return docker.from_env()
+
+    @staticmethod
+    def _close_client(client: Any) -> None:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+    def _service_name(self) -> str:
+        return str(getattr(self.settings, "service", "") or "app").strip()
+
+    def _compose_dir_value(self) -> str:
+        return str(getattr(self.settings, "compose_dir", "") or "").strip()
+
+    def _compose_dir(self) -> Path:
+        return Path(self._compose_dir_value())
+
+    def _compose_file(self) -> str:
+        return str(getattr(self.settings, "compose_file", "") or "docker-compose.yml").strip()
+
+    def _helper_image(self) -> str:
+        return str(getattr(self.settings, "helper_image", "") or "docker:28-cli").strip()
+
+    def _host_compose_dir_value(self) -> str:
+        return str(getattr(self.settings, "host_compose_dir", "") or "").strip()
+
+    def _host_data_dir_value(self) -> str:
+        return str(getattr(self.settings, "host_data_dir", "") or "").strip()
+
+    def _helper_compose_project_dir(self) -> Path:
+        return Path(self._host_compose_dir_value())
+
+    def _helper_job_source_dir(self, job_id: str) -> Path:
+        return Path(self._host_data_dir_value()) / "update-jobs" / job_id
+
+    @staticmethod
+    def _valid_compose_file(value: str) -> bool:
+        if not value or not DOCKER_COMPOSE_FILE_RE.match(value):
+            return False
+        path = PurePosixPath(value)
+        return not path.is_absolute() and ".." not in path.parts and str(path) not in {"", "."}
+
+    @staticmethod
+    def _helper_script(
+        *,
+        service: str,
+        compose_file: str,
+        project_dir: Path,
+        target_tag: str,
+        target_version: str,
+        release_url: str,
+    ) -> str:
+        target_tag_json = json.dumps(str(target_tag), ensure_ascii=True)
+        target_version_json = json.dumps(str(target_version), ensure_ascii=True)
+        release_url_json = json.dumps(str(release_url), ensure_ascii=True)
+        compose_path = shlex.quote(str(project_dir / compose_file))
+        service_arg = shlex.quote(service)
+        return f"""#!/bin/sh
+set -u
+
+write_status() {{
+  state="$1"
+  message="$2"
+  finished="$3"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ "$finished" = "1" ]; then
+    cat > /job/status.json.tmp <<JSON
+{{"status":"$state","message":"$message","target_tag":{target_tag_json},"target_version":{target_version_json},"release_url":{release_url_json},"updated_at":"$now","finished_at":"$now"}}
+JSON
+  else
+    cat > /job/status.json.tmp <<JSON
+{{"status":"$state","message":"$message","target_tag":{target_tag_json},"target_version":{target_version_json},"release_url":{release_url_json},"updated_at":"$now"}}
+JSON
+  fi
+  mv /job/status.json.tmp /job/status.json
+}}
+
+log() {{
+  printf '%s %s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a /job/log.txt
+}}
+
+write_status running "Docker compose update started" 0
+log "Pulling latest Docker image for {service}"
+if ! docker compose -f {compose_path} pull {service_arg} >> /job/log.txt 2>&1; then
+  write_status failed "Docker compose pull failed" 1
+  exit 1
+fi
+
+log "Recreating Docker service {service}"
+if ! docker compose -f {compose_path} up -d {service_arg} >> /job/log.txt 2>&1; then
+  write_status failed "Docker compose up failed" 1
+  exit 1
+fi
+
+write_status succeeded "Docker update completed" 1
+"""
+
+
 def _checksum_for_asset(asset_name: str, checksum_text: str) -> str | None:
     asset_basename = Path(asset_name).name
     for raw_line in checksum_text.splitlines():
@@ -569,4 +816,16 @@ def _safe_release_dir_prefix(version: str) -> str:
     return f"release-{value or 'unknown'}"
 
 
-DockerUpdateExecutor = BinaryUpdateExecutor
+def _safe_container_suffix(value: str) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip())
+    suffix = suffix.strip(".-")
+    return suffix[:48] or "job"
+
+
+def _docker_container_id(container: Any) -> str:
+    if isinstance(container, dict):
+        return str(container.get("id") or container.get("short_id") or "")
+    return str(getattr(container, "id", "") or getattr(container, "short_id", "") or "")
+
+
+DockerUpdateExecutor = DockerComposeUpdateExecutor
