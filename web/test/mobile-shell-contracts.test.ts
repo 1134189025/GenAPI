@@ -36,12 +36,17 @@ describe("mobile authenticated app shell", () => {
     expect(authenticatedShell).toContain("overflow-x-hidden");
     expect(authenticatedShell).toContain('const normalizedPath = normalizeDashboardPath(pathname)');
     expect(authenticatedShell).toContain('const isImageWorkspace = normalizedPath === "/image"');
-    expect(authenticatedShell).toContain("pb-[calc(5.5rem+env(safe-area-inset-bottom))]");
+    expect(authenticatedShell).toContain("pb-[calc(4.5rem+env(safe-area-inset-bottom))]");
     expect(authenticatedShell).toContain('isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5"');
     expect(authenticatedShell).toContain("lg:pb-5");
     expect(authenticatedShell).toContain("session.role === \"user\"");
     expect(mobileNav).toContain("fixed inset-x-0 bottom-0");
     expect(mobileNav).toContain("lg:hidden");
     expect(mobileNav).toContain("env(safe-area-inset-bottom)");
+    expect(mobileNav).toContain("pt-1.5");
+    expect(mobileNav).toContain("text-[10px]");
+    expect(mobileNav).toContain("size-7");
+    expect(mobileNav).not.toContain("text-[11px]");
+    expect(mobileNav).not.toContain("size-8");
   });
 });

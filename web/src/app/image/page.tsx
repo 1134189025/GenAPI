@@ -1008,11 +1008,11 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
   return (
     <>
-      <section className="relative mx-auto flex h-[calc(100dvh-4.75rem)] min-h-0 w-full max-w-[1180px] flex-col overflow-hidden px-3 pb-0 sm:h-[calc(100vh-5rem)] sm:px-5 sm:pb-4">
+      <section className="relative mx-auto flex h-[calc(100dvh-4.25rem)] min-h-0 w-full max-w-[1180px] flex-col overflow-hidden px-3 pb-0 sm:h-[calc(100vh-5rem)] sm:px-5 sm:pb-4">
         <div className="pointer-events-none absolute inset-x-4 top-2 -z-10 h-40 rounded-full bg-[radial-gradient(circle_at_center,rgba(214,211,209,0.55),transparent_70%)] blur-3xl" />
-        <div className="flex shrink-0 items-center justify-between gap-3 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 py-2 sm:py-3">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold tracking-tight text-stone-950 sm:text-xl">生成图片</h1>
+            <h1 className="truncate text-base font-semibold tracking-tight text-stone-950 sm:text-xl">生成图片</h1>
             <p className="hidden text-sm text-stone-500 sm:block">描述画面，生成结果，满意后继续编辑。</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -1027,7 +1027,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
             ) : null}
             <Button
               variant="outline"
-              className="h-10 rounded-full border-stone-200 bg-white/85 px-3 text-stone-700 shadow-sm sm:px-4"
+              className="h-9 rounded-full border-stone-200 bg-white/85 px-3 text-stone-700 shadow-sm sm:h-10 sm:px-4"
               onClick={() => setIsHistoryOpen(true)}
               aria-label="打开历史记录"
             >
@@ -1036,7 +1036,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               <span className="ml-1 text-xs text-stone-400 sm:ml-2">{conversations.length}</span>
             </Button>
             <Button
-              className="h-10 rounded-full bg-stone-950 px-3 text-white shadow-sm hover:bg-stone-800 sm:px-4"
+              className="h-9 rounded-full bg-stone-950 px-3 text-white shadow-sm hover:bg-stone-800 sm:h-10 sm:px-4"
               onClick={handleCreateDraft}
               aria-label="新建图片对话"
             >
@@ -1048,7 +1048,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
         <div
           ref={resultsViewportRef}
-          className="hide-scrollbar -mx-3 min-h-0 flex-1 overscroll-contain overflow-y-auto bg-stone-50/50 px-3 py-4 sm:mx-0 sm:rounded-[34px] sm:border sm:border-stone-200/70 sm:px-5 sm:py-6"
+          className="hide-scrollbar -mx-3 min-h-0 flex-1 overscroll-contain overflow-y-auto bg-stone-50/50 px-3 py-3 sm:mx-0 sm:rounded-[34px] sm:border sm:border-stone-200/70 sm:px-5 sm:py-6"
         >
           <ImageResults
             selectedConversation={selectedConversation}
@@ -1059,7 +1059,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
           />
         </div>
 
-        <div className="relative z-20 shrink-0 pt-3">
+        <div className="relative z-20 shrink-0 pt-2 sm:pt-3">
           <ImageComposer
             mode={imageMode}
             prompt={imagePrompt}
@@ -1078,6 +1078,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
             onPickReferenceImage={() => fileInputRef.current?.click()}
             onReferenceImageChange={handleReferenceImageChange}
             onRemoveReferenceImage={handleRemoveReferenceImage}
+            reserveMobileBottomNav={!isAdmin}
           />
         </div>
       </section>

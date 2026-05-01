@@ -14,19 +14,25 @@ describe("mobile image page contracts", () => {
     const composer = source("src/app/image/components/image-composer.tsx");
 
     expect(page).not.toContain('className="relative mx-auto flex h-[calc(100vh-5rem)]');
-    expect(page).toContain("h-[calc(100dvh-4.75rem)]");
+    expect(page).toContain("h-[calc(100dvh-4.25rem)]");
     expect(page).toContain("sm:h-[calc(100vh-5rem)]");
     expect(page).toContain("overflow-hidden");
-    expect(composer).toContain("pb-[calc(5.5rem+env(safe-area-inset-bottom))]");
+    expect(composer).toContain("reserveMobileBottomNav");
+    expect(composer).toContain("pb-[calc(4.25rem+env(safe-area-inset-bottom))]");
     expect(composer).toContain("lg:pb-2");
   });
 
-  test("keeps mobile prompt and send primary while secondary controls can wrap or collapse", () => {
+  test("keeps the mobile prompt composer compact while send stays primary", () => {
     const composer = source("src/app/image/components/image-composer.tsx");
 
-    expect(composer).toContain("min-h-[76px]");
-    expect(composer).toContain("max-h-[32dvh]");
-    expect(composer).toContain('isMoreSettingsOpen ? "flex" : "hidden sm:flex"');
+    expect(composer).toContain("rows={1}");
+    expect(composer).toContain("min-h-[44px]");
+    expect(composer).toContain("max-h-[18dvh]");
+    expect(composer).toContain("isDesktop ? 0.32 : 0.18");
+    expect(composer).toContain("overflow-y-auto");
+    expect(composer).toContain("sm:min-h-[116px]");
+    expect(composer).toContain("sm:max-h-[32dvh]");
+    expect(composer).not.toContain("min-h-[76px]");
     expect(composer).toContain("flex min-w-0 flex-1 flex-wrap");
     expect(composer).toContain("touch-manipulation");
   });
@@ -34,14 +40,27 @@ describe("mobile image page contracts", () => {
   test("keeps reference image previews from expanding the fixed mobile workspace", () => {
     const composer = source("src/app/image/components/image-composer.tsx");
 
-    expect(composer).toContain("max-h-[5rem]");
+    expect(composer).toContain("max-h-[3.75rem]");
     expect(composer).toContain("overflow-x-auto");
     expect(composer).toContain("overscroll-x-contain");
     expect(composer).toContain("sm:max-h-[9rem]");
     expect(composer).toContain("sm:overflow-y-auto");
-    expect(composer).toContain("relative size-16 flex-none");
+    expect(composer).toContain("relative size-14 flex-none sm:size-16");
+    expect(composer).toContain("group size-14");
+    expect(composer).toContain("sm:size-16");
     expect(composer).toContain("absolute right-1 top-1");
     expect(composer).not.toContain("absolute -right-1 -top-1");
+  });
+
+  test("keeps the mobile empty state dense so the composer does not dominate the viewport", () => {
+    const results = source("src/app/image/components/image-results.tsx");
+
+    expect(results).toContain("min-h-[240px]");
+    expect(results).toContain("sm:min-h-[420px]");
+    expect(results).toContain("text-xl");
+    expect(results).toContain("sm:text-5xl");
+    expect(results).toContain("overflow-x-auto");
+    expect(results).toContain("min-w-[12rem]");
   });
 
   test("keeps the mobile size menu within the viewport above the bottom composer", () => {

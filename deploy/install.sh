@@ -16,13 +16,13 @@ TMP_DIR=""
 usage() {
   cat <<'USAGE'
 Usage:
-  install.sh install [--version 0.1.13] [--repo owner/repo]
-  install.sh upgrade [--version 0.1.13] [--repo owner/repo]
+  install.sh install [--version 0.1.14] [--repo owner/repo]
+  install.sh upgrade [--version 0.1.14] [--repo owner/repo]
   install.sh rollback
 
 Environment:
   GENAPI_REPO           GitHub repository, default: 1134189025/GenAPI
-  GENAPI_VERSION        Version or tag to install, for example 0.1.13 or v0.1.13
+  GENAPI_VERSION        Version or tag to install, for example 0.1.14 or v0.1.14
   GENAPI_GITHUB_TOKEN   Optional token for private release downloads
 USAGE
 }

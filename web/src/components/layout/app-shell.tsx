@@ -143,7 +143,7 @@ function MobileUserBottomNavigation({ pathname }: { pathname: string }) {
   return (
     <nav
       aria-label="移动端用户导航"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/92 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-18px_50px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/92 px-2 pb-[calc(0.35rem+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-14px_42px_-30px_rgba(15,23,42,0.4)] backdrop-blur-xl lg:hidden"
     >
       <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
         {items.map((item) => {
@@ -156,19 +156,19 @@ function MobileUserBottomNavigation({ pathname }: { pathname: string }) {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "group flex min-w-0 flex-col items-center gap-1 rounded-2xl px-1.5 py-1.5 text-[11px] font-bold transition",
+                "group flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1 py-1 text-[10px] font-bold transition",
                 active ? "bg-teal-50 text-teal-700" : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-900",
               )}
             >
               <span
                 className={cn(
-                  "grid size-8 place-items-center rounded-xl transition",
+                  "grid size-7 place-items-center rounded-lg transition",
                   active ? "bg-teal-500 text-white shadow-sm" : "bg-slate-50 text-slate-400 group-hover:text-teal-600",
                 )}
               >
-                <Icon className="size-4" />
+                <Icon className="size-3.5" />
               </span>
-              <span className="block w-full truncate text-center leading-4">{item.label}</span>
+              <span className="block w-full truncate text-center leading-3">{item.label}</span>
             </Link>
           );
         })}
@@ -282,7 +282,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="relative flex min-h-screen min-w-0 flex-col overflow-x-hidden lg:pl-72">
         <header className="sticky top-0 z-30 border-b border-white/70 bg-white/78 backdrop-blur-xl">
-          <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6 lg:px-8">
+          <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-16 md:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
               {session.role === "admin" ? (
                 <button
@@ -321,7 +321,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             "min-w-0 flex-1 px-4 md:px-6 lg:px-8",
             isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5" : "pt-5",
             !isImageWorkspace && session.role === "user"
-              ? "pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-5"
+              ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-5"
               : !isImageWorkspace
                 ? "pb-5"
                 : "",
