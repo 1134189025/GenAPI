@@ -273,7 +273,7 @@ export function UpdateCard() {
   return (
     <DataPanel
       title="版本更新中心"
-      description="面向 Genapi 0.1.9 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
+      description="面向 Genapi 0.1.10 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
       toolbar={
         <>
           <Button

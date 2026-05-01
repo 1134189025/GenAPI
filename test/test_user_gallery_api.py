@@ -215,6 +215,51 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertFalse(any((self.data_dir / "images").rglob("*.png")) if (self.data_dir / "images").exists() else False)
         self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 0)
 
+    def test_image_generation_records_target_and_actual_resolution_metadata(self) -> None:
+        _, headers = self.create_user("resolution-generator@example.com", image_quota=1)
+
+        with patch(
+            "api.ai.openai_v1_image_generations.handle",
+            return_value={"created": 123, "data": [{"b64_json": PNG_B64, "revised_prompt": "wide result"}]},
+        ):
+            response = self.client.post(
+                "/api/image/generations",
+                headers=headers,
+                json={"prompt": "draw", "model": "gpt-image-2", "n": 1, "size": "1536x864"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()["data"][0]
+        self.assertEqual(item["width"], 1)
+        self.assertEqual(item["height"], 1)
+        self.assertEqual(item["target_size"], "1536x864")
+        self.assertEqual(item["target_width"], 1536)
+        self.assertEqual(item["target_height"], 864)
+
+        listed = self.client.get("/api/gallery/images", headers=headers)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        gallery_item = listed.json()["items"][0]
+        self.assertEqual(gallery_item["width"], 1)
+        self.assertEqual(gallery_item["height"], 1)
+        self.assertEqual(gallery_item["target_size"], "1536x864")
+        self.assertEqual(gallery_item["target_width"], 1536)
+        self.assertEqual(gallery_item["target_height"], 864)
+
+    def test_image_generation_rejects_non_preset_resolution(self) -> None:
+        _, headers = self.create_user("bad-resolution@example.com", image_quota=1)
+
+        with patch("api.ai.openai_v1_image_generations.handle") as handle:
+            response = self.client.post(
+                "/api/image/generations",
+                headers=headers,
+                json={"prompt": "draw", "model": "gpt-image-2", "n": 1, "size": "123x456"},
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("unsupported image size", response.text)
+        handle.assert_not_called()
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
+
     def test_image_edit_success_writes_gallery_record(self) -> None:
         _, headers = self.create_user("editor@example.com", image_quota=1)
 
@@ -235,6 +280,22 @@ class UserGalleryAPITests(unittest.TestCase):
         listed = self.client.get("/api/gallery/images", headers=headers)
         self.assertEqual(listed.json()["items"][0]["source"], "edit")
         self.assertEqual(self.client.get(item["content_url"], headers=headers).content, PNG_BYTES)
+
+    def test_image_edit_rejects_non_preset_resolution_before_spending_quota(self) -> None:
+        _, headers = self.create_user("bad-edit-resolution@example.com", image_quota=1)
+
+        with patch("api.ai.openai_v1_image_edit.handle") as handle:
+            response = self.client.post(
+                "/api/image/edits",
+                headers=headers,
+                data={"prompt": "edit", "model": "gpt-image-2", "n": "1", "size": "123x456"},
+                files={"image": ("source.png", PNG_BYTES, "image/png")},
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("unsupported image size", response.text)
+        handle.assert_not_called()
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
 
     def test_failed_image_generation_does_not_write_gallery_record_or_spend_quota(self) -> None:
         _, headers = self.create_user("failed@example.com", image_quota=1)

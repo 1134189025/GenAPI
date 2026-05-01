@@ -86,7 +86,7 @@ export function ImageResults({
                   id: image.id,
                   src: image.b64_json ? `data:image/png;base64,${image.b64_json}` : image.url || "",
                   sizeLabel: image.b64_json ? formatBase64ImageSize(image.b64_json) : undefined,
-                  dimensions: imageDimensions[image.id],
+                  dimensions: storedImageDimensions(image) || imageDimensions[image.id],
                 },
               ]
             : [],
@@ -142,7 +142,7 @@ export function ImageResults({
 
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-stone-500">
                   <span>{turn.count} 张</span>
-                  <span>{turn.size || "默认比例"}</span>
+                  <span>{turn.size || "默认尺寸"}</span>
                   {turn.status === "queued" ? (
                     <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">排队中</span>
                   ) : null}
@@ -152,9 +152,16 @@ export function ImageResults({
                   {turn.images.map((image, index) => {
                     if (image.status === "success" && (image.b64_json || image.url)) {
                       const currentIndex = successfulTurnImages.findIndex((item) => item.id === image.id);
+                      const targetSize = image.targetSize || turn.size;
+                      const actualDimensions = storedImageDimensions(image) || imageDimensions[image.id];
                       const sizeLabel = image.b64_json ? formatBase64ImageSize(image.b64_json) : "";
-                      const dimensions = imageDimensions[image.id];
-                      const imageMeta = [sizeLabel, dimensions].filter(Boolean).join(" · ");
+                      const imageMeta = [
+                        targetSize ? `目标 ${targetSize}` : "",
+                        actualDimensions ? `实际 ${actualDimensions}` : "",
+                        sizeLabel,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
                       const serverImageSrc = image.url || "";
                       const imageSrc = image.b64_json ? `data:image/png;base64,${image.b64_json}` : serverImageSrc;
                       const downloadSrc = image.b64_json ? imageSrc : image.url || imageSrc;
@@ -290,19 +297,19 @@ function getTurnStatusLabel(status: ImageTurnStatus) {
 }
 
 function getImageAspectClass(size: string) {
-  if (size === "1:1") {
+  if (size === "1:1" || size === "1024x1024") {
     return "aspect-square";
   }
-  if (size === "16:9") {
+  if (size === "16:9" || size === "1536x864") {
     return "aspect-video";
   }
-  if (size === "9:16") {
+  if (size === "9:16" || size === "864x1536") {
     return "aspect-[9/16]";
   }
-  if (size === "4:3") {
+  if (size === "4:3" || size === "1280x960") {
     return "aspect-[4/3]";
   }
-  if (size === "3:4") {
+  if (size === "3:4" || size === "960x1280") {
     return "aspect-[3/4]";
   }
   return "aspect-square";
@@ -324,4 +331,11 @@ function formatBase64ImageSize(base64: string) {
 
 function formatImageDimensions(width: number, height: number) {
   return `${width} x ${height}`;
+}
+
+function storedImageDimensions(image: StoredImage) {
+  if (typeof image.width === "number" && typeof image.height === "number") {
+    return formatImageDimensions(image.width, image.height);
+  }
+  return "";
 }

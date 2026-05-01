@@ -106,18 +106,91 @@ def assistant_history_messages(messages: list[dict[str, Any]]) -> list[str]:
     return [str(item.get("content") or "") for item in messages if item.get("role") == "assistant" and item.get("content")]
 
 
+IMAGE_RESOLUTION_PRESETS: dict[str, dict[str, Any]] = {
+    "1024x1024": {
+        "target_width": 1024,
+        "target_height": 1024,
+        "target_aspect_ratio": "1:1",
+        "prompt_hint": "目标输出分辨率为 1024x1024，1:1 正方形构图，主体居中，适合正方形画幅。",
+    },
+    "1536x864": {
+        "target_width": 1536,
+        "target_height": 864,
+        "target_aspect_ratio": "16:9",
+        "prompt_hint": "目标输出分辨率为 1536x864，16:9 横版构图，适合宽画幅展示。",
+    },
+    "864x1536": {
+        "target_width": 864,
+        "target_height": 1536,
+        "target_aspect_ratio": "9:16",
+        "prompt_hint": "目标输出分辨率为 864x1536，9:16 竖版构图，适合竖版画幅展示。",
+    },
+    "1280x960": {
+        "target_width": 1280,
+        "target_height": 960,
+        "target_aspect_ratio": "4:3",
+        "prompt_hint": "目标输出分辨率为 1280x960，4:3 横版构图，兼顾宽度与高度，适合展示画面细节。",
+    },
+    "960x1280": {
+        "target_width": 960,
+        "target_height": 1280,
+        "target_aspect_ratio": "3:4",
+        "prompt_hint": "目标输出分辨率为 960x1280，3:4 竖版构图，适合人物肖像或竖向场景。",
+    },
+}
+
+LEGACY_IMAGE_ASPECT_RATIOS: dict[str, str] = {
+    "1:1": "输出为 1:1 正方形构图，主体居中，适合正方形画幅。",
+    "16:9": "输出为 16:9 横屏构图，适合宽画幅展示。",
+    "9:16": "输出为 9:16 竖屏构图，适合竖版画幅展示。",
+    "4:3": "输出为 4:3 比例，兼顾宽度与高度，适合展示画面细节。",
+    "3:4": "输出为 3:4 比例，纵向构图，适合人物肖像或竖向场景。",
+}
+
+
+def normalize_image_size(size: str | None) -> str:
+    value = str(size or "").strip().lower().replace("×", "x")
+    return re.sub(r"\s+", "", value)
+
+
+def validate_image_size(size: str | None) -> str:
+    normalized = normalize_image_size(size)
+    if not normalized:
+        return ""
+    if normalized in IMAGE_RESOLUTION_PRESETS or normalized in LEGACY_IMAGE_ASPECT_RATIOS:
+        return normalized
+    supported = [*IMAGE_RESOLUTION_PRESETS.keys(), *LEGACY_IMAGE_ASPECT_RATIOS.keys()]
+    raise ValueError(f"unsupported image size: {size}. supported sizes: {', '.join(supported)}")
+
+
+def image_size_metadata(size: str | None) -> dict[str, object]:
+    normalized = validate_image_size(size)
+    if not normalized:
+        return {}
+    if normalized in IMAGE_RESOLUTION_PRESETS:
+        preset = IMAGE_RESOLUTION_PRESETS[normalized]
+        return {
+            "target_size": normalized,
+            "target_width": preset["target_width"],
+            "target_height": preset["target_height"],
+            "target_aspect_ratio": preset["target_aspect_ratio"],
+        }
+    return {
+        "target_size": normalized,
+        "target_width": None,
+        "target_height": None,
+        "target_aspect_ratio": normalized,
+    }
+
+
 def build_image_prompt(prompt: str, size: str | None) -> str:
-    if not size:
+    normalized = validate_image_size(size)
+    if not normalized:
         return prompt
-    if size not in {"1:1", "16:9", "9:16", "4:3", "3:4"}:
-        return f"{prompt.strip()}\n\n输出图片，宽高比为 {size}。"
-    hint = {
-        "1:1": "输出为 1:1 正方形构图，主体居中，适合正方形画幅。",
-        "16:9": "输出为 16:9 横屏构图，适合宽画幅展示。",
-        "9:16": "输出为 9:16 竖屏构图，适合竖版画幅展示。",
-        "4:3": "输出为 4:3 比例，兼顾宽度与高度，适合展示画面细节。",
-        "3:4": "输出为 3:4 比例，纵向构图，适合人物肖像或竖向场景。",
-    }[size]
+    if normalized in IMAGE_RESOLUTION_PRESETS:
+        hint = str(IMAGE_RESOLUTION_PRESETS[normalized]["prompt_hint"])
+    else:
+        hint = LEGACY_IMAGE_ASPECT_RATIOS[normalized]
     return f"{prompt.strip()}\n\n{hint}"
 
 
@@ -543,6 +616,16 @@ def stream_image_outputs(
 def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[ImageOutput]:
     if str(request.model or "").strip() not in IMAGE_MODELS:
         raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(IMAGE_MODELS))
+    try:
+        request.size = validate_image_size(request.size) or None
+    except ValueError as exc:
+        raise ImageGenerationError(
+            str(exc),
+            status_code=400,
+            error_type="invalid_request_error",
+            code="invalid_image_size",
+            param="size",
+        ) from exc
 
     emitted = False
     last_error = ""

@@ -130,6 +130,20 @@ describe("user gallery contracts", () => {
     expect(results).toContain("b64_json");
   });
 
+  test("declares gallery resolution metadata and renders actual dimensions", () => {
+    const apiSource = source("src/lib/api.ts");
+    const galleryPage = source("src/app/gallery/page.tsx");
+
+    expect(apiSource).toContain("width?: number");
+    expect(apiSource).toContain("height?: number");
+    expect(apiSource).toContain("target_size?: string");
+    expect(apiSource).toContain("target_width?: number");
+    expect(apiSource).toContain("target_height?: number");
+    expect(galleryPage).toContain("galleryImageDimensions");
+    expect(galleryPage).toContain("target_size");
+    expect(galleryPage).toContain("实际尺寸");
+  });
+
   test("scopes gallery edit handoff per user and consumes it once", async () => {
     const handoffPath = join(root, "src/store/image-edit-handoff.ts");
     expect(existsSync(handoffPath)).toBe(true);

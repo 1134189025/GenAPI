@@ -49,6 +49,19 @@ function galleryImageSizeBytes(item: GalleryImage) {
   return Number(item.size_bytes ?? item.byte_size ?? 0);
 }
 
+function galleryImageDimensions(item: GalleryImage) {
+  const width = Number(item.width);
+  const height = Number(item.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return "";
+  }
+  return `${width} x ${height}`;
+}
+
+function galleryTargetSize(item: GalleryImage) {
+  return String(item.target_size || item.size || "").trim();
+}
+
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -125,9 +138,10 @@ export default function GalleryPage() {
             id: item.id,
             src: preview.url,
             sizeLabel: formatBytes(galleryImageSizeBytes(item)),
+            dimensions: galleryImageDimensions(item),
           };
         })
-        .filter((item): item is { id: string; src: string; sizeLabel: string } => Boolean(item)),
+        .filter((item): item is { id: string; src: string; sizeLabel: string; dimensions: string } => Boolean(item)),
     [items, previews],
   );
 
@@ -465,7 +479,7 @@ export default function GalleryPage() {
             galleryId: item.id,
             prompt: item.prompt,
             model: item.model,
-            size: item.size,
+            size: galleryTargetSize(item),
           },
         );
         router.push("/image");
@@ -564,6 +578,8 @@ export default function GalleryPage() {
               const preview = previews[item.id];
               const previewError = previewErrors[item.id];
               const busy = Boolean(busyIds[item.id]);
+              const targetSize = galleryTargetSize(item);
+              const actualDimensions = galleryImageDimensions(item);
               return (
                 <article key={item.id} className="overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm">
                   <button
@@ -600,7 +616,8 @@ export default function GalleryPage() {
                         {item.prompt || item.revised_prompt || "未命名图片"}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                        <span>{item.size || "默认比例"}</span>
+                        <span>{targetSize ? `目标尺寸 ${targetSize}` : "默认尺寸"}</span>
+                        {actualDimensions ? <span>实际尺寸 {actualDimensions}</span> : null}
                         <span>{formatBytes(galleryImageSizeBytes(item))}</span>
                         <span>到期 {formatDate(item.expires_at)}</span>
                       </div>

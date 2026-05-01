@@ -70,6 +70,22 @@ class GalleryService:
         return path
 
     @staticmethod
+    def _metadata(row: UserGalleryImageModel) -> dict[str, object]:
+        try:
+            value = json.loads(clean_string(row.metadata_json) or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _public_metadata(metadata: dict[str, object]) -> dict[str, object]:
+        public: dict[str, object] = {}
+        for key in ("width", "height", "target_size", "target_width", "target_height", "target_aspect_ratio"):
+            if key in metadata:
+                public[key] = metadata[key]
+        return public
+
+    @staticmethod
     def content_url(image_id: str) -> str:
         return f"/api/gallery/images/{clean_string(image_id)}/content"
 
@@ -77,6 +93,7 @@ class GalleryService:
         content_url = self.content_url(str(row.id))
         storage_path = clean_string(row.storage_path)
         filename = Path(storage_path).name
+        metadata = self._public_metadata(self._metadata(row))
         return {
             "id": row.id,
             "user_id": row.user_id,
@@ -98,6 +115,7 @@ class GalleryService:
             "expires_at": iso(row.expires_at),
             "content_url": content_url,
             "url": content_url,
+            **metadata,
         }
 
     @staticmethod

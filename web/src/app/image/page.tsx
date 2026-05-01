@@ -39,6 +39,7 @@ import {
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = "genapi:image_active_conversation_id";
 const IMAGE_SIZE_STORAGE_KEY = "genapi:image_last_size";
+const IMAGE_SIZE_PRESETS = new Set(["1024x1024", "1536x864", "864x1536", "1280x960", "960x1280"]);
 const activeConversationQueueIds = new Set<string>();
 let imageQueueDrainInProgress = false;
 
@@ -73,6 +74,15 @@ function createId() {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeImageSizePreference(value: string | null | undefined) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace("×", "x")
+    .replace(/\s+/g, "");
+  return IMAGE_SIZE_PRESETS.has(normalized) ? normalized : "";
 }
 
 function readFileAsDataUrl(file: File) {
@@ -295,7 +305,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
       setIsLoadingHistory(true);
       try {
         const storedSize = typeof window !== "undefined" ? window.localStorage.getItem(imageSizeStorageKey) : null;
-        setImageSize(storedSize || "");
+        setImageSize(normalizeImageSizePreference(storedSize));
 
         const items = await listImageConversations(userId);
         const normalizedItems = await recoverConversationHistory(userId, items);
@@ -346,6 +356,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         setImagePrompt("");
         setReferenceImages([handoff.image]);
         setReferenceImageFiles([dataUrlToFile(handoff.image.dataUrl, handoff.image.name, handoff.image.type)]);
+        setImageSize(normalizeImageSizePreference(handoff.source.size));
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -429,7 +440,13 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     }
 
     if (imageSize) {
-      window.localStorage.setItem(imageSizeStorageKey, imageSize);
+      const normalizedSize = normalizeImageSizePreference(imageSize);
+      if (normalizedSize) {
+        window.localStorage.setItem(imageSizeStorageKey, normalizedSize);
+        return;
+      }
+      setImageSize("");
+      window.localStorage.removeItem(imageSizeStorageKey);
       return;
     }
     window.localStorage.removeItem(imageSizeStorageKey);
@@ -753,6 +770,18 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               serverId: first.gallery_id,
               url: first.content_url || first.url,
               expiresAt: first.expires_at,
+              width: typeof first.width === "number" ? first.width : undefined,
+              height: typeof first.height === "number" ? first.height : undefined,
+              targetSize: typeof first.target_size === "string" ? first.target_size : undefined,
+              targetWidth:
+                typeof first.target_width === "number" ? first.target_width : first.target_width === null ? null : undefined,
+              targetHeight:
+                typeof first.target_height === "number"
+                  ? first.target_height
+                  : first.target_height === null
+                    ? null
+                    : undefined,
+              targetAspectRatio: typeof first.target_aspect_ratio === "string" ? first.target_aspect_ratio : undefined,
             };
 
             await updateConversation(
@@ -927,6 +956,10 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     const now = new Date().toISOString();
     const conversationId = targetConversation?.id ?? createId();
     const turnId = createId();
+    const selectedImageSize = normalizeImageSizePreference(imageSize);
+    if (imageSize && !selectedImageSize) {
+      setImageSize("");
+    }
     const draftTurn: ImageTurn = {
       id: turnId,
       prompt,
@@ -934,7 +967,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
       mode: imageMode,
       referenceImages: imageMode === "edit" ? referenceImages : [],
       count: parsedCount,
-      size: imageSize,
+      size: selectedImageSize,
       images: Array.from({ length: parsedCount }, (_, index) => ({
         id: `${turnId}-${index}`,
         status: "loading" as const,

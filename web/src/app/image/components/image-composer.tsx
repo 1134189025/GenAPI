@@ -32,11 +32,11 @@ type ImageComposerProps = {
 
 const imageSizeOptions = [
   { value: "", label: "未指定" },
-  { value: "1:1", label: "1:1 正方形" },
-  { value: "16:9", label: "16:9 横版" },
-  { value: "4:3", label: "4:3 横版" },
-  { value: "3:4", label: "3:4 竖版" },
-  { value: "9:16", label: "9:16 竖版" },
+  { value: "1024x1024", label: "1024x1024 正方形" },
+  { value: "1536x864", label: "1536x864 横版" },
+  { value: "864x1536", label: "864x1536 竖版" },
+  { value: "1280x960", label: "1280x960 横版" },
+  { value: "960x1280", label: "960x1280 竖版" },
 ];
 
 export function ImageComposer({
@@ -216,7 +216,7 @@ export function ImageComposer({
                     ref={sizeMenuRef}
                     className="relative flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
                   >
-                    <span className="font-medium text-stone-700 sm:text-sm">比例</span>
+                    <span className="font-medium text-stone-700 sm:text-sm">尺寸</span>
                     <button
                       type="button"
                       className="flex h-7 w-[98px] items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 sm:h-8 sm:w-[128px]"

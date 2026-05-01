@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Iterable
+from io import BytesIO
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from api.support import require_identity, resolve_image_base_url
@@ -16,6 +18,7 @@ from services.protocol import (
     openai_v1_image_edit,
     openai_v1_image_generations,
 )
+from services.protocol.conversation import image_size_metadata, validate_image_size
 
 IMAGE_EDIT_MAX_FILES = 4
 IMAGE_EDIT_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
@@ -44,6 +47,22 @@ def _reserve_or_error(identity: dict[str, object], count: int, endpoint: str):
         if exc.status_code == 429:
             return JSONResponse(status_code=429, content=openai_quota_error(exc))
         raise HTTPException(status_code=exc.status_code, detail={"error": exc.message}) from exc
+
+
+def _validated_image_size(size: str | None) -> str:
+    try:
+        return validate_image_size(size)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+
+def _image_dimensions(image_data: bytes) -> tuple[int | None, int | None]:
+    try:
+        with Image.open(BytesIO(image_data)) as image:
+            width, height = image.size
+    except Exception:
+        return None, None
+    return int(width), int(height)
 
 
 def _attach_gallery_images(
@@ -98,6 +117,12 @@ def _attach_gallery_images(
                 image_data = base64.b64decode(b64_json)
             except Exception as exc:
                 raise HTTPException(status_code=502, detail={"error": "invalid generated image data"}) from exc
+            width, height = _image_dimensions(image_data)
+            metadata = {
+                **image_size_metadata(size),
+                "width": width,
+                "height": height,
+            }
             gallery_item = gallery_service.save_user_image(
                 user_id=user_id,
                 image_data=image_data,
@@ -108,9 +133,11 @@ def _attach_gallery_images(
                 source=source,
                 source_endpoint=endpoint,
                 usage_event_id=usage_event_id,
+                metadata=metadata,
             )
             gallery_id = str(gallery_item["id"])
             created_gallery_ids.append(gallery_id)
+            item.update(metadata)
             item["gallery_id"] = gallery_id
             item["content_url"] = gallery_item["content_url"]
             item["url"] = gallery_item["content_url"]
@@ -163,7 +190,9 @@ def create_router() -> APIRouter:
             authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization)
+        size = _validated_image_size(body.size)
         payload = body.model_dump(mode="python")
+        payload["size"] = size or None
         payload["base_url"] = resolve_image_base_url(request)
         payload["save_public_images"] = False
         quota_reservation = _reserve_or_error(identity, body.n, "/api/image/generations")
@@ -180,7 +209,7 @@ def create_router() -> APIRouter:
                 source="generation",
                 prompt=body.prompt,
                 model=body.model,
-                size=body.size,
+                size=size,
                 response_format=body.response_format,
             )
 
@@ -205,6 +234,7 @@ def create_router() -> APIRouter:
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
+        normalized_size = _validated_image_size(size)
         quota_reservation = _reserve_or_error(identity, n, "/api/image/edits")
         if isinstance(quota_reservation, JSONResponse):
             return quota_reservation
@@ -221,7 +251,7 @@ def create_router() -> APIRouter:
             "images": images,
             "model": model,
             "n": n,
-            "size": size,
+            "size": normalized_size or None,
             "response_format": response_format,
             "stream": stream,
             "base_url": resolve_image_base_url(request),
@@ -238,7 +268,7 @@ def create_router() -> APIRouter:
                 source="edit",
                 prompt=prompt,
                 model=model,
-                size=size,
+                size=normalized_size,
                 response_format=response_format,
             )
 

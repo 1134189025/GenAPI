@@ -20,6 +20,12 @@ export type StoredImage = {
   serverId?: string;
   url?: string;
   expiresAt?: string;
+  width?: number;
+  height?: number;
+  targetSize?: string;
+  targetWidth?: number | null;
+  targetHeight?: number | null;
+  targetAspectRatio?: string;
   error?: string;
 };
 
@@ -59,13 +65,36 @@ const imageConversationStorage = localforage.createInstance({
 
 let imageConversationWriteQueue: Promise<void> = Promise.resolve();
 
+function normalizeOptionalNumber(value: unknown): number | undefined {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
+}
+
+function normalizeOptionalNullableNumber(value: unknown): number | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return normalizeOptionalNumber(value);
+}
+
 function normalizeStoredImage(image: StoredImage): StoredImage {
-  if (image.status === "loading" || image.status === "error" || image.status === "success") {
-    return image;
+  const source = image as StoredImage & Record<string, unknown>;
+  const normalized: StoredImage = {
+    ...image,
+    width: normalizeOptionalNumber(source.width),
+    height: normalizeOptionalNumber(source.height),
+    targetSize: typeof source.targetSize === "string" && source.targetSize ? source.targetSize : undefined,
+    targetWidth: normalizeOptionalNullableNumber(source.targetWidth),
+    targetHeight: normalizeOptionalNullableNumber(source.targetHeight),
+    targetAspectRatio:
+      typeof source.targetAspectRatio === "string" && source.targetAspectRatio ? source.targetAspectRatio : undefined,
+  };
+  if (normalized.status === "loading" || normalized.status === "error" || normalized.status === "success") {
+    return normalized;
   }
   return {
-    ...image,
-    status: image.b64_json ? "success" : "loading",
+    ...normalized,
+    status: normalized.b64_json ? "success" : "loading",
   };
 }
 

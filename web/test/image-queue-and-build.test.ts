@@ -67,6 +67,31 @@ describe("image queue and build safety", () => {
     expect(api).toContain("Authorization: `Bearer ${token}`");
   });
 
+  test("image composer exposes fixed resolution presets instead of free-form ratios", () => {
+    const composer = source("src/app/image/components/image-composer.tsx");
+
+    expect(composer).toContain("1024x1024");
+    expect(composer).toContain("1536x864");
+    expect(composer).toContain("864x1536");
+    expect(composer).toContain("1280x960");
+    expect(composer).toContain("960x1280");
+    expect(composer).toContain(">尺寸<");
+    expect(composer).not.toContain(">比例<");
+  });
+
+  test("image results expose target and actual resolution metadata", () => {
+    const api = source("src/lib/api.ts");
+    const store = source("src/store/image-conversations.ts");
+    const results = source("src/app/image/components/image-results.tsx");
+
+    expect(api).toContain("width?: number");
+    expect(api).toContain("target_size?: string");
+    expect(store).toContain("width?: number");
+    expect(store).toContain("targetSize?: string");
+    expect(results).toContain("targetSize");
+    expect(results).toContain("actualDimensions");
+  });
+
   test("does not let production builds ignore TypeScript errors", () => {
     const nextConfig = source("next.config.ts");
 

@@ -95,6 +95,12 @@ export type GalleryImage = {
   revised_prompt?: string;
   model: ImageModel | string;
   size: string;
+  width?: number | null;
+  height?: number | null;
+  target_size?: string | null;
+  target_width?: number | null;
+  target_height?: number | null;
+  target_aspect_ratio?: string | null;
   created_at: string;
   expires_at: string;
   size_bytes: number;
@@ -130,6 +136,12 @@ export type ImageResponse = {
     gallery_id?: string;
     content_url?: string;
     expires_at?: string;
+    width?: number | null;
+    height?: number | null;
+    target_size?: string | null;
+    target_width?: number | null;
+    target_height?: number | null;
+    target_aspect_ratio?: string | null;
   }>;
 };
 
