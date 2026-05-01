@@ -980,6 +980,40 @@ class UserManagementAPITests(unittest.TestCase):
         self.assertEqual(still_admin.json()["user"]["role"], "admin")
         self.assertEqual(still_admin.json()["user"]["enabled"], True)
 
+    def test_admin_self_protection_normalizes_path_user_id(self) -> None:
+        admin_token = self.create_admin()
+        headers = self.auth_headers(admin_token)
+        me = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me.status_code, 200, me.text)
+        admin_id = me.json()["user"]["id"]
+
+        second_admin = self.client.post(
+            "/api/admin/users",
+            headers=headers,
+            json={
+                "email": "second-normalized-admin@example.com",
+                "password": "AdminPass123!",
+                "role": "admin",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(second_admin.status_code, 200, second_admin.text)
+
+        encoded_self_path = f"/api/admin/users/%20{admin_id}%20"
+        demoted = self.client.patch(encoded_self_path, headers=headers, json={"role": "user"})
+        self.assertEqual(demoted.status_code, 400, demoted.text)
+
+        disabled = self.client.patch(encoded_self_path, headers=headers, json={"enabled": False})
+        self.assertEqual(disabled.status_code, 400, disabled.text)
+
+        deleted = self.client.delete(encoded_self_path, headers=headers)
+        self.assertEqual(deleted.status_code, 400, deleted.text)
+
+        still_admin = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(still_admin.status_code, 200, still_admin.text)
+        self.assertEqual(still_admin.json()["user"]["role"], "admin")
+        self.assertEqual(still_admin.json()["user"]["enabled"], True)
+
     def test_demoting_admin_without_image_concurrency_sets_user_minimum(self) -> None:
         admin_token = self.create_admin()
         headers = self.auth_headers(admin_token)
@@ -1105,6 +1139,47 @@ class UserManagementAPITests(unittest.TestCase):
             json={"email": "suspend@example.com", "password": "UserPass123!"},
         )
         self.assertEqual(new_login.status_code, 200, new_login.text)
+
+    def test_role_change_invalidates_older_jwts(self) -> None:
+        admin_token = self.create_admin()
+        admin_headers = self.auth_headers(admin_token)
+        created = self.client.post(
+            "/api/admin/users",
+            headers=admin_headers,
+            json={
+                "email": "promote@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        user_id = created.json()["item"]["id"]
+
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "promote@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        old_headers = self.auth_headers(login.json()["token"])
+        self.assertEqual(self.client.get("/api/admin/users", headers=old_headers).status_code, 403)
+
+        promoted = self.client.patch(
+            f"/api/admin/users/{user_id}",
+            headers=admin_headers,
+            json={"role": "admin"},
+        )
+        self.assertEqual(promoted.status_code, 200, promoted.text)
+
+        self.assertEqual(self.client.get("/api/auth/me", headers=old_headers).status_code, 401)
+        self.assertEqual(self.client.get("/api/admin/users", headers=old_headers).status_code, 401)
+
+        new_login = self.client.post(
+            "/api/auth/login",
+            json={"email": "promote@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(new_login.status_code, 200, new_login.text)
+        self.assertEqual(new_login.json()["user"]["role"], "admin")
 
     def test_concurrent_verification_code_consume_is_one_time(self) -> None:
         service = self.user_service()

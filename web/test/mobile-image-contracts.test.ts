@@ -17,8 +17,11 @@ describe("mobile image page contracts", () => {
     expect(page).toContain("h-[calc(100dvh-4.25rem)]");
     expect(page).toContain("sm:h-[calc(100vh-5rem)]");
     expect(page).toContain("overflow-hidden");
+    expect(page).toContain('isAdmin={session.role === "admin"}');
+    expect(page).toContain("reserveMobileBottomNav={!isAdmin}");
     expect(composer).toContain("reserveMobileBottomNav");
-    expect(composer).toContain("pb-[calc(4.25rem+env(safe-area-inset-bottom))]");
+    expect(composer).toContain("pb-[calc(3.75rem+env(safe-area-inset-bottom))]");
+    expect(composer).not.toContain("pb-[calc(4.25rem+env(safe-area-inset-bottom))]");
     expect(composer).toContain("lg:pb-2");
   });
 

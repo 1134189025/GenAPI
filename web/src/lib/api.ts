@@ -440,8 +440,13 @@ export type SystemVersionResponse = {
   [key: string]: unknown;
 };
 
+const AUTH_CHECK_TIMEOUT_MS = 8000;
+const USER_ACTION_TIMEOUT_MS = 30000;
+const IMAGE_REQUEST_TIMEOUT_MS = 900000;
+const IMAGE_EDIT_REQUEST_TIMEOUT_MS = 1800000;
+
 export async function fetchSetupStatus() {
-  return httpRequest<SetupStatus>("/api/setup/status", { redirectOnUnauthorized: false });
+  return httpRequest<SetupStatus>("/api/setup/status", { redirectOnUnauthorized: false, timeoutMs: AUTH_CHECK_TIMEOUT_MS });
 }
 
 export async function setupAdmin(payload: { email: string; password: string }) {
@@ -453,7 +458,10 @@ export async function setupAdmin(payload: { email: string; password: string }) {
 }
 
 export async function fetchPublicSettings() {
-  return httpRequest<{ settings: PublicSettings }>("/api/public/settings", { redirectOnUnauthorized: false });
+  return httpRequest<{ settings: PublicSettings }>("/api/public/settings", {
+    redirectOnUnauthorized: false,
+    timeoutMs: AUTH_CHECK_TIMEOUT_MS,
+  });
 }
 
 export async function login(email: string, password: string) {
@@ -487,7 +495,10 @@ export async function sendVerifyCode(email: string) {
 }
 
 export async function fetchMe(redirectOnUnauthorized = true) {
-  return httpRequest<{ user: ManagedUser }>("/api/auth/me", { redirectOnUnauthorized });
+  return httpRequest<{ user: ManagedUser }>("/api/auth/me", {
+    redirectOnUnauthorized,
+    timeoutMs: AUTH_CHECK_TIMEOUT_MS,
+  });
 }
 
 export async function logout() {
@@ -498,7 +509,7 @@ export async function logout() {
 }
 
 export async function fetchAccounts() {
-  return httpRequest<AccountListResponse>("/api/accounts");
+  return httpRequest<AccountListResponse>("/api/accounts", { timeoutMs: USER_ACTION_TIMEOUT_MS });
 }
 
 export async function exportAccounts() {
@@ -572,6 +583,7 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
     {
       method: "POST",
       headers: authorizationHeader(authToken),
+      timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
       body: {
         prompt,
         ...(model ? { model } : {}),
@@ -610,6 +622,7 @@ export async function editImage(
     {
       method: "POST",
       headers: authorizationHeader(authToken),
+      timeoutMs: IMAGE_EDIT_REQUEST_TIMEOUT_MS,
       body: formData,
     },
   );
@@ -814,11 +827,15 @@ export async function deleteRedeemCode(codeId: string) {
 }
 
 export async function redeemCode(code: string) {
-  return httpRequest<{ redeem: RedeemCode; user: ManagedUser }>("/api/redeem", { method: "POST", body: { code } });
+  return httpRequest<{ redeem: RedeemCode; user: ManagedUser }>("/api/redeem", {
+    method: "POST",
+    body: { code },
+    timeoutMs: USER_ACTION_TIMEOUT_MS,
+  });
 }
 
 export async function fetchRedeemHistory() {
-  return httpRequest<{ items: RedeemCode[] }>("/api/redeem/history");
+  return httpRequest<{ items: RedeemCode[] }>("/api/redeem/history", { timeoutMs: USER_ACTION_TIMEOUT_MS });
 }
 
 export async function fetchPromoCodes() {

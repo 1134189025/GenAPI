@@ -32,6 +32,25 @@ describe("mobile user page layout contracts", () => {
     expect(redeemPage).toContain("rounded-[20px] border border-slate-200/70 bg-white/90 p-3 shadow-sm sm:rounded-[24px] sm:p-4");
   });
 
+  test("authenticated user pages defer API loading until the auth guard resolves", () => {
+    const pages = [
+      {
+        path: "src/app/redeem/page.tsx",
+        flag: "canLoadRedeemData",
+      },
+      {
+        path: "src/app/membership/page.tsx",
+        flag: "canLoadMembershipData",
+      },
+    ];
+
+    for (const page of pages) {
+      const content = source(page.path);
+      expect(content).toContain(`const ${page.flag} = !isCheckingAuth && Boolean(session);`);
+      expect(content).toContain(`if (!${page.flag} || didLoadRef.current) return;`);
+    }
+  });
+
   test("membership page avoids hard three-column mobile grids and preserves long values", () => {
     const membershipPage = source("src/app/membership/page.tsx");
     const statCard = source("src/components/common/stat-card.tsx");

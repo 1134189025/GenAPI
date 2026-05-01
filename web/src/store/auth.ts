@@ -14,6 +14,7 @@ export type StoredAuthSession = {
 export const AUTH_KEY_STORAGE_KEY = "genapi_auth_key";
 export const AUTH_SESSION_STORAGE_KEY = "genapi_auth_session";
 export const AUTH_SESSION_BROADCAST_CHANNEL = "genapi_auth_session_events";
+const AUTH_STORAGE_TIMEOUT_MS = 3000;
 
 const authStorage = localforage.createInstance({
   name: "genapi",
@@ -53,6 +54,32 @@ function normalizeSession(value: unknown, fallbackKey = ""): StoredAuthSession |
   };
 }
 
+type AuthStorageResult<T> = {
+  ok: boolean;
+  value: T;
+};
+
+async function withAuthStorageTimeout<T>(operation: Promise<T>, fallback: T): Promise<AuthStorageResult<T>> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation.then(
+        (value) => ({ ok: true, value }),
+        () => ({ ok: false, value: fallback }),
+      ),
+      new Promise<AuthStorageResult<T>>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ ok: false, value: fallback }), AUTH_STORAGE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return { ok: false, value: fallback };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export function getDefaultRouteForRole(role: AuthRole) {
   return role === "admin" ? "/admin/accounts" : "/image";
 }
@@ -61,8 +88,12 @@ export async function getStoredAuthKey() {
   if (typeof window === "undefined") {
     return "";
   }
-  const value = await authStorage.getItem<string>(AUTH_KEY_STORAGE_KEY);
-  return String(value || "").trim();
+  const result = await withAuthStorageTimeout(authStorage.getItem<string>(AUTH_KEY_STORAGE_KEY), "");
+  if (!result.ok) {
+    await clearStoredAuthSession();
+    return "";
+  }
+  return String(result.value || "").trim();
 }
 
 export async function getStoredAuthSession() {
@@ -70,15 +101,31 @@ export async function getStoredAuthSession() {
     return null;
   }
 
-  const [storedKey, storedSession] = await Promise.all([
-    authStorage.getItem<string>(AUTH_KEY_STORAGE_KEY),
-    authStorage.getItem<StoredAuthSession>(AUTH_SESSION_STORAGE_KEY),
-  ]);
+  const storedResult = await withAuthStorageTimeout(
+    Promise.all([
+      authStorage.getItem<string>(AUTH_KEY_STORAGE_KEY),
+      authStorage.getItem<StoredAuthSession>(AUTH_SESSION_STORAGE_KEY),
+    ]),
+    ["", null] as [string, StoredAuthSession | null],
+  );
+  if (!storedResult.ok) {
+    await clearStoredAuthSession();
+    return null;
+  }
+
+  const [storedKey, storedSession] = storedResult.value;
 
   const normalizedSession = normalizeSession(storedSession, String(storedKey || ""));
   if (normalizedSession) {
     if (normalizedSession.key !== String(storedKey || "").trim()) {
-      await authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedSession.key);
+      const writeResult = await withAuthStorageTimeout(
+        authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedSession.key),
+        undefined,
+      );
+      if (!writeResult.ok) {
+        await clearStoredAuthSession();
+        return null;
+      }
     }
     return normalizedSession;
   }
@@ -96,10 +143,17 @@ export async function setStoredAuthSession(session: StoredAuthSession) {
     return;
   }
 
-  await Promise.all([
-    authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedSession.key),
-    authStorage.setItem(AUTH_SESSION_STORAGE_KEY, normalizedSession),
-  ]);
+  const writeResult = await withAuthStorageTimeout(
+    Promise.all([
+      authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedSession.key),
+      authStorage.setItem(AUTH_SESSION_STORAGE_KEY, normalizedSession),
+    ]),
+    undefined,
+  );
+  if (!writeResult.ok) {
+    await clearStoredAuthSession();
+    throw new Error("Failed to persist auth session");
+  }
   broadcastAuthSessionChanged(normalizedSession);
 }
 
@@ -109,7 +163,11 @@ export async function setStoredAuthKey(authKey: string) {
     await clearStoredAuthSession();
     return;
   }
-  await authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedAuthKey);
+  const writeResult = await withAuthStorageTimeout(authStorage.setItem(AUTH_KEY_STORAGE_KEY, normalizedAuthKey), undefined);
+  if (!writeResult.ok) {
+    await clearStoredAuthSession();
+    throw new Error("Failed to persist auth session");
+  }
   broadcastAuthSessionChanged(null);
 }
 
@@ -117,11 +175,44 @@ export async function clearStoredAuthSession() {
   if (typeof window === "undefined") {
     return;
   }
-  await Promise.all([
-    authStorage.removeItem(AUTH_KEY_STORAGE_KEY),
-    authStorage.removeItem(AUTH_SESSION_STORAGE_KEY),
-  ]);
+  await withAuthStorageTimeout(
+    Promise.all([
+      authStorage.removeItem(AUTH_KEY_STORAGE_KEY),
+      authStorage.removeItem(AUTH_SESSION_STORAGE_KEY),
+    ]),
+    undefined,
+  );
   broadcastAuthSessionChanged(null);
+}
+
+export async function clearStoredAuthSessionIfCurrent(expectedKey: string) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const normalizedExpectedKey = String(expectedKey || "").trim();
+  if (!normalizedExpectedKey) {
+    return false;
+  }
+  const storedResult = await withAuthStorageTimeout(
+    Promise.all([
+      authStorage.getItem<string>(AUTH_KEY_STORAGE_KEY),
+      authStorage.getItem<StoredAuthSession>(AUTH_SESSION_STORAGE_KEY),
+    ]),
+    ["", null] as [string, StoredAuthSession | null],
+  );
+  if (!storedResult.ok) {
+    return false;
+  }
+
+  const [storedKey, storedSession] = storedResult.value;
+  const normalizedSession = normalizeSession(storedSession, String(storedKey || ""));
+  const currentKey = normalizedSession?.key || String(storedKey || "").trim();
+  if (currentKey !== normalizedExpectedKey) {
+    return false;
+  }
+
+  await clearStoredAuthSession();
+  return true;
 }
 
 export async function clearStoredAuthKey() {

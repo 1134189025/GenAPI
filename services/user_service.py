@@ -1333,6 +1333,8 @@ class UserService:
                 next_token_version += 1
             if "role" in updates and updates.get("role") in {"admin", "user"}:
                 values["role"] = next_role
+                if next_role != str(user.role):
+                    next_token_version += 1
             if "enabled" in updates:
                 values["enabled"] = next_enabled
                 if bool(user.enabled) and not next_enabled:

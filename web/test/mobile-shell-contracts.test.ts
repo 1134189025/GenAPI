@@ -28,7 +28,7 @@ describe("mobile authenticated app shell", () => {
     expect(mobileNav).toContain("normalizedPath === item.href");
   });
 
-  test("shows the bottom navigation only on authenticated mobile and pads content above it", () => {
+  test("shows a visible fixed-height bottom navigation only for mobile users", () => {
     const shell = source("src/components/layout/app-shell.tsx");
     const mobileNav = shell.slice(shell.indexOf("function MobileUserBottomNavigation"), shell.indexOf("export function AppShell"));
     const authenticatedShell = shell.slice(shell.indexOf("if (isPublic || !session)"), shell.lastIndexOf("</main>"));
@@ -36,11 +36,18 @@ describe("mobile authenticated app shell", () => {
     expect(authenticatedShell).toContain("overflow-x-hidden");
     expect(authenticatedShell).toContain('const normalizedPath = normalizeDashboardPath(pathname)');
     expect(authenticatedShell).toContain('const isImageWorkspace = normalizedPath === "/image"');
-    expect(authenticatedShell).toContain("pb-[calc(4.5rem+env(safe-area-inset-bottom))]");
+    expect(authenticatedShell).toContain("pb-[calc(3.75rem+env(safe-area-inset-bottom))]");
+    expect(authenticatedShell).not.toContain("pb-[calc(4.5rem+env(safe-area-inset-bottom))]");
     expect(authenticatedShell).toContain('isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5"');
     expect(authenticatedShell).toContain("lg:pb-5");
-    expect(authenticatedShell).toContain("session.role === \"user\"");
+    expect(authenticatedShell).toContain('session.role === "admin" && mobileOpen');
+    expect(authenticatedShell).toContain('session.role === "user" ? <MobileUserBottomNavigation pathname={pathname} /> : null');
     expect(mobileNav).toContain("fixed inset-x-0 bottom-0");
+    expect(mobileNav).toContain("h-[calc(3.5rem+env(safe-area-inset-bottom))]");
+    expect(mobileNav).toContain("z-50");
+    expect(mobileNav).toContain("bg-white");
+    expect(mobileNav).not.toContain("z-40");
+    expect(mobileNav).not.toContain("bg-white/92");
     expect(mobileNav).toContain("lg:hidden");
     expect(mobileNav).toContain("env(safe-area-inset-bottom)");
     expect(mobileNav).toContain("pt-1.5");

@@ -25,6 +25,14 @@ const contentTypes = {
   ".woff2": "font/woff2",
 };
 
+const staleNextScript = [
+  "try{",
+  "var key='genapi:stale-next-script-reload';",
+  "if(!sessionStorage.getItem(key)){sessionStorage.setItem(key,'1');location.reload();}",
+  "else{console.error('Genapi static assets are stale; please hard refresh.');}",
+  "}catch(error){location.reload();}",
+].join("");
+
 function isInsideDirectory(filePath, directory) {
   const relativePath = relative(directory, filePath);
   return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
@@ -36,6 +44,36 @@ function isExistingFile(filePath) {
 
 function statusPlan(status, message) {
   return { status, message };
+}
+
+function isStaleNextScriptRequest(pathname) {
+  return pathname.startsWith("/_next/static/") && pathname.endsWith(".js");
+}
+
+function staleNextScriptPlan() {
+  return {
+    status: 200,
+    staleNextScript: true,
+    body: staleNextScript,
+    headers: {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  };
+}
+
+function responseHeadersForFile(filePath) {
+  const extension = extname(filePath).toLowerCase();
+  const normalizedPath = filePath.replaceAll("\\", "/");
+  const headers = {
+    "Content-Type": contentTypes[extension] || "application/octet-stream",
+  };
+  if (extension === ".html") {
+    headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+  } else if (normalizedPath.includes("/_next/static/")) {
+    headers["Cache-Control"] = "public, max-age=31536000, immutable";
+  }
+  return headers;
 }
 
 export function resolveStaticRequest(url, staticOutDir = outDir) {
@@ -81,9 +119,13 @@ export function resolveStaticRequest(url, staticOutDir = outDir) {
     return { status: 200, filePath };
   }
 
-  const isApiPath = pathname === "/api" || pathname.startsWith("/api/");
+  const firstSegment = pathname.split("/", 2)[1] || "";
+  const isReservedPath = ["api", "v1", "auth"].includes(firstSegment);
   const hasExtension = Boolean(extname(filePath));
-  if (isApiPath || hasExtension) {
+  if (isStaleNextScriptRequest(pathname)) {
+    return staleNextScriptPlan();
+  }
+  if (isReservedPath || hasExtension) {
     return statusPlan(404, "Not found");
   }
 
@@ -95,10 +137,7 @@ export function resolveStaticRequest(url, staticOutDir = outDir) {
 }
 
 function sendFile(response, filePath) {
-  const headers = {
-    "Content-Type": contentTypes[extname(filePath).toLowerCase()] || "application/octet-stream",
-  };
-  response.writeHead(200, headers);
+  response.writeHead(200, responseHeadersForFile(filePath));
   createReadStream(filePath).pipe(response);
 }
 
@@ -113,6 +152,11 @@ if (import.meta.main) {
     if (plan.status !== 200) {
       response.writeHead(plan.status);
       response.end(plan.message);
+      return;
+    }
+    if (plan.body !== undefined) {
+      response.writeHead(plan.status, plan.headers || {});
+      response.end(plan.body);
       return;
     }
 

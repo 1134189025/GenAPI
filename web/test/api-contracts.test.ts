@@ -4,6 +4,9 @@ const httpRequest = mock(async (path: string) => {
   if (path === "/api/settings") {
     return { config: { proxy: "http://proxy.local:8080" } };
   }
+  if (path === "/api/image/generations" || path === "/api/image/edits") {
+    return { data: [] };
+  }
   return {};
 });
 const httpBlobRequest = mock(async () => new Blob());
@@ -71,5 +74,68 @@ describe("frontend backend API contracts", () => {
       ["/api/checkin/status"],
       ["/api/checkin", { method: "POST" }],
     ]);
+  });
+
+  test("uses bounded timeouts for redeem page account and history requests", async () => {
+    await api.fetchMe();
+    await api.fetchRedeemHistory();
+    await api.redeemCode("IMG-TEST");
+
+    const meOptions = httpRequest.mock.calls[0]?.[1] as Record<string, unknown>;
+    const historyOptions = httpRequest.mock.calls[1]?.[1] as Record<string, unknown>;
+    const redeemOptions = httpRequest.mock.calls[2]?.[1] as Record<string, unknown>;
+
+    expect(httpRequest.mock.calls[0]?.[0]).toBe("/api/auth/me");
+    expect(meOptions.redirectOnUnauthorized).toBe(true);
+    expect(typeof meOptions.timeoutMs).toBe("number");
+    expect(meOptions.timeoutMs).toBeGreaterThan(0);
+
+    expect(httpRequest.mock.calls[1]?.[0]).toBe("/api/redeem/history");
+    expect(typeof historyOptions.timeoutMs).toBe("number");
+    expect(historyOptions.timeoutMs).toBeGreaterThan(0);
+
+    expect(httpRequest.mock.calls[2]?.[0]).toBe("/api/redeem");
+    expect(redeemOptions.method).toBe("POST");
+    expect(redeemOptions.body).toEqual({ code: "IMG-TEST" });
+    expect(typeof redeemOptions.timeoutMs).toBe("number");
+    expect(redeemOptions.timeoutMs).toBeGreaterThan(0);
+  });
+
+  test("uses bounded timeouts for image queue quota refresh requests", async () => {
+    await api.fetchMe();
+    await api.fetchAccounts();
+
+    const meOptions = httpRequest.mock.calls[0]?.[1] as Record<string, unknown>;
+    const accountsOptions = httpRequest.mock.calls[1]?.[1] as Record<string, unknown>;
+
+    expect(httpRequest.mock.calls[0]?.[0]).toBe("/api/auth/me");
+    expect(typeof meOptions.timeoutMs).toBe("number");
+    expect(meOptions.timeoutMs).toBeGreaterThan(0);
+
+    expect(httpRequest.mock.calls[1]?.[0]).toBe("/api/accounts");
+    expect(typeof accountsOptions.timeoutMs).toBe("number");
+    expect(accountsOptions.timeoutMs).toBeGreaterThan(0);
+  });
+
+  test("uses bounded timeouts and scoped tokens for image generation requests", async () => {
+    const file = new File(["image-bytes"], "reference.png", { type: "image/png" });
+
+    await api.generateImage("prompt", "gpt-image-1", "1024x1024", "token-a");
+    await api.editImage(file, "edit prompt", "gpt-image-1", "1536x864", "token-b");
+
+    const generateOptions = httpRequest.mock.calls[0]?.[1] as Record<string, unknown>;
+    const editOptions = httpRequest.mock.calls[1]?.[1] as Record<string, unknown>;
+
+    expect(httpRequest.mock.calls[0]?.[0]).toBe("/api/image/generations");
+    expect(generateOptions.method).toBe("POST");
+    expect(generateOptions.headers).toEqual({ Authorization: "Bearer token-a" });
+    expect(typeof generateOptions.timeoutMs).toBe("number");
+    expect(generateOptions.timeoutMs).toBeGreaterThanOrEqual(900000);
+
+    expect(httpRequest.mock.calls[1]?.[0]).toBe("/api/image/edits");
+    expect(editOptions.method).toBe("POST");
+    expect(editOptions.headers).toEqual({ Authorization: "Bearer token-b" });
+    expect(typeof editOptions.timeoutMs).toBe("number");
+    expect(editOptions.timeoutMs).toBeGreaterThanOrEqual(1800000);
   });
 });

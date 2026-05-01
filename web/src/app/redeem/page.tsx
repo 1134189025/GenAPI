@@ -58,6 +58,7 @@ export default function RedeemPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<RedeemFeedback | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const canLoadRedeemData = !isCheckingAuth && Boolean(session);
 
   const load = async () => {
     setIsLoading(true);
@@ -76,10 +77,10 @@ export default function RedeemPage() {
   };
 
   useEffect(() => {
-    if (didLoadRef.current) return;
+    if (!canLoadRedeemData || didLoadRef.current) return;
     didLoadRef.current = true;
     void load();
-  }, []);
+  }, [canLoadRedeemData]);
 
   const handleRedeem = async () => {
     const normalizedCode = code.trim();

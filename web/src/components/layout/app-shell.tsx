@@ -22,12 +22,12 @@ import {
 } from "lucide-react";
 
 import webConfig from "@/constants/common-env";
-import { fetchMe, logout } from "@/lib/api";
+import { logout } from "@/lib/api";
+import { isAuthSessionChangedError, verifyStoredAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/utils";
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
-  setStoredAuthSession,
   type StoredAuthSession,
 } from "@/store/auth";
 import {
@@ -143,7 +143,7 @@ function MobileUserBottomNavigation({ pathname }: { pathname: string }) {
   return (
     <nav
       aria-label="移动端用户导航"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/92 px-2 pb-[calc(0.35rem+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-14px_42px_-30px_rgba(15,23,42,0.4)] backdrop-blur-xl lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-50 h-[calc(3.5rem+env(safe-area-inset-bottom))] border-t border-slate-200/80 bg-white px-2 pb-[calc(0.35rem+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-14px_42px_-30px_rgba(15,23,42,0.4)] backdrop-blur-xl lg:hidden"
     >
       <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
         {items.map((item) => {
@@ -203,19 +203,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const data = await fetchMe(false);
-        const verifiedSession: StoredAuthSession = {
-          key: storedSession.key,
-          role: data.user.role,
-          subjectId: data.user.id,
-          name: data.user.email,
-        };
-        await setStoredAuthSession(verifiedSession);
+        const verifiedSession = await verifyStoredAuthSession(storedSession);
         if (active) {
           setSession(verifiedSession);
         }
-      } catch {
-        await clearStoredAuthSession();
+      } catch (error) {
+        if (isAuthSessionChangedError(error)) {
+          if (active) {
+            setSession(error.latestSession);
+          }
+          return;
+        }
         if (active) {
           setSession(null);
         }
@@ -321,7 +319,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             "min-w-0 flex-1 px-4 md:px-6 lg:px-8",
             isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5" : "pt-5",
             !isImageWorkspace && session.role === "user"
-              ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-5"
+              ? "pb-[calc(3.75rem+env(safe-area-inset-bottom))] lg:pb-5"
               : !isImageWorkspace
                 ? "pb-5"
                 : "",

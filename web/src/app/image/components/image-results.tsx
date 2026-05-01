@@ -6,7 +6,12 @@ import { Clock3, Download, LoaderCircle, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ImageConversation, ImageTurnStatus, StoredImage, StoredReferenceImage } from "@/store/image-conversations";
+import type {
+  ImageConversation,
+  ImageTurnStatus,
+  StoredImage,
+  StoredReferenceImage,
+} from "@/store/image-conversations";
 
 export type ImageLightboxItem = {
   id: string;
@@ -46,10 +51,10 @@ export function ImageResults({
     return (
       <div className="flex h-full min-h-[240px] items-center justify-center px-0 text-center sm:min-h-[420px] sm:px-2">
         <div className="w-full max-w-3xl">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-400 sm:mb-3 sm:text-xs sm:tracking-[0.28em]">Image Studio</p>
-          <h1 className="text-xl font-semibold tracking-tight text-stone-950 sm:text-5xl">
-            想生成什么图片？
-          </h1>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-400 sm:mb-3 sm:text-xs sm:tracking-[0.28em]">
+            Image Studio
+          </p>
+          <h1 className="text-xl font-semibold tracking-tight text-stone-950 sm:text-5xl">想生成什么图片？</h1>
           <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-stone-500 sm:mt-4 sm:text-base sm:leading-7">
             输入一句描述就能开始。需要改图时，直接粘贴或上传参考图。
           </p>
@@ -62,7 +67,9 @@ export function ImageResults({
                 onClick={() => onUsePrompt?.(item.prompt)}
               >
                 <div className="text-xs font-semibold text-stone-950 sm:text-sm">{item.title}</div>
-                <div className="mt-1 text-[11px] leading-4 text-stone-500 sm:mt-2 sm:text-xs sm:leading-5">{item.prompt}</div>
+                <div className="mt-1 text-[11px] leading-4 text-stone-500 sm:mt-2 sm:text-xs sm:leading-5">
+                  {item.prompt}
+                </div>
               </button>
             ))}
           </div>
@@ -144,7 +151,7 @@ export function ImageResults({
                   <span>{turn.count} 张</span>
                   <span>{turn.size || "默认尺寸"}</span>
                   {turn.status === "queued" ? (
-                    <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">排队中</span>
+                    <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">正在启动</span>
                   ) : null}
                 </div>
 
@@ -247,7 +254,7 @@ export function ImageResults({
                               <LoaderCircle className="size-5 animate-spin" />
                             )}
                           </div>
-                          <p className="text-sm">{turn.status === "queued" ? "等待生成..." : "正在生成..."}</p>
+                          <p className="text-sm">{turn.status === "queued" ? "正在启动..." : "正在生成..."}</p>
                         </div>
                       </div>
                     );
@@ -285,7 +292,7 @@ const promptIdeas = [
 
 function getTurnStatusLabel(status: ImageTurnStatus) {
   if (status === "queued") {
-    return "排队中";
+    return "等待生成";
   }
   if (status === "generating") {
     return "处理中";

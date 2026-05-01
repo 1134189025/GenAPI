@@ -40,8 +40,6 @@ import {
 const ACTIVE_CONVERSATION_STORAGE_KEY = "genapi:image_active_conversation_id";
 const IMAGE_SIZE_STORAGE_KEY = "genapi:image_last_size";
 const IMAGE_SIZE_PRESETS = new Set(["1024x1024", "1536x864", "864x1536", "1280x960", "960x1280"]);
-const activeConversationQueueIds = new Set<string>();
-let imageQueueDrainInProgress = false;
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -102,7 +100,9 @@ function dataUrlToFile(dataUrl: string, fileName: string, mimeType?: string) {
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  return new File([bytes], fileName, { type: mimeType || matchedMimeType || "image/png" });
+  return new File([bytes], fileName, {
+    type: mimeType || matchedMimeType || "image/png",
+  });
 }
 
 function buildReferenceImageFromResult(image: StoredImage, fileName: string): StoredReferenceImage | null {
@@ -144,6 +144,14 @@ function countActiveImageRequests(conversations: ImageConversation[]) {
 }
 
 async function recoverConversationHistory(ownerId: string, items: ImageConversation[]) {
+  const latestStoredUpdatedAt = Math.max(
+    Date.now(),
+    ...items.map((conversation) => {
+      const timestamp = new Date(conversation.updatedAt).getTime();
+      return Number.isFinite(timestamp) ? timestamp : 0;
+    }),
+  );
+  const recoveryUpdatedAt = new Date(latestStoredUpdatedAt + 1).toISOString();
   const normalized = items.map((conversation) => {
     let changed = false;
 
@@ -168,12 +176,13 @@ async function recoverConversationHistory(ownerId: string, items: ImageConversat
 
       const failedCount = turn.images.filter((image) => image.status === "error").length;
       const successCount = turn.images.filter((image) => image.status === "success").length;
-      const nextStatus: ImageTurnStatus =
-        failedCount > 0 ? "error" : successCount > 0 ? "success" : "queued";
-      const nextError = failedCount > 0 ? turn.error || `其中 ${failedCount} 张未成功生成` : undefined;
-      if (nextStatus === turn.status && nextError === turn.error) {
-        return turn;
-      }
+      const nextStatus: ImageTurnStatus = failedCount > 0 ? "error" : successCount > 0 ? "success" : "error";
+      const nextError =
+        failedCount > 0
+          ? turn.error || `其中 ${failedCount} 张未成功生成`
+          : successCount > 0
+            ? undefined
+            : turn.error || "图片生成未完成";
 
       changed = true;
       return {
@@ -187,11 +196,10 @@ async function recoverConversationHistory(ownerId: string, items: ImageConversat
       return conversation;
     }
 
-    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
     return {
       ...conversation,
       turns,
-      updatedAt: lastTurn?.createdAt || conversation.updatedAt,
+      updatedAt: recoveryUpdatedAt,
     };
   });
 
@@ -207,7 +215,10 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
   const didLoadQuotaRef = useRef(false);
   const didConsumeGalleryHandoffRef = useRef(false);
   const conversationsRef = useRef<ImageConversation[]>([]);
+  const activeConversationQueueIdsRef = useRef<Set<string>>(new Set());
+  const imageQueueDrainInProgressRef = useRef(false);
   const isImageQueueOwnerActiveRef = useRef(true);
+  const imageQueueOwnerSessionKeyRef = useRef(sessionKey);
   const resultsViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -242,7 +253,8 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     [conversations, selectedConversationId],
   );
   const activeTaskCount = useMemo(() => countActiveImageRequests(conversations), [conversations]);
-  const deleteConfirmTitle = deleteConfirm?.type === "all" ? "清空历史记录" : deleteConfirm?.type === "one" ? "删除对话" : "";
+  const deleteConfirmTitle =
+    deleteConfirm?.type === "all" ? "清空历史记录" : deleteConfirm?.type === "one" ? "删除对话" : "";
   const deleteConfirmDescription =
     deleteConfirm?.type === "all"
       ? "确认删除全部图片历史记录吗？删除后无法恢复。"
@@ -254,19 +266,34 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     conversationsRef.current = conversations;
   }, [conversations]);
 
+  const deactivateImageQueueOwner = useCallback((ownerSessionKey: string) => {
+    if (imageQueueOwnerSessionKeyRef.current !== ownerSessionKey) {
+      return;
+    }
+
+    isImageQueueOwnerActiveRef.current = false;
+    activeConversationQueueIdsRef.current.clear();
+    activeConversationQueueIdsRef.current = new Set();
+    imageQueueDrainInProgressRef.current = false;
+  }, []);
+
   const isCurrentImageQueueOwner = useCallback(async () => {
     if (!isImageQueueOwnerActiveRef.current) {
       return false;
     }
+    if (imageQueueOwnerSessionKeyRef.current !== sessionKey) {
+      return false;
+    }
     const storedSession = await getStoredAuthSession();
     if (storedSession?.subjectId !== userId || storedSession.key !== sessionKey) {
-      isImageQueueOwnerActiveRef.current = false;
+      deactivateImageQueueOwner(sessionKey);
       return false;
     }
     return true;
-  }, [sessionKey, userId]);
+  }, [deactivateImageQueueOwner, sessionKey, userId]);
 
   useEffect(() => {
+    imageQueueOwnerSessionKeyRef.current = sessionKey;
     isImageQueueOwnerActiveRef.current = true;
 
     const channel =
@@ -291,12 +318,12 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      isImageQueueOwnerActiveRef.current = false;
+      deactivateImageQueueOwner(sessionKey);
       channel?.close();
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [isCurrentImageQueueOwner]);
+  }, [deactivateImageQueueOwner, isCurrentImageQueueOwner, sessionKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -620,29 +647,26 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     setReferenceImages((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   }, []);
 
-  const handleContinueEdit = useCallback(
-    (conversationId: string, image: StoredImage | StoredReferenceImage) => {
-      const nextReferenceImage =
-        "dataUrl" in image
-          ? image
-          : buildReferenceImageFromResult(image, `conversation-${conversationId}-${Date.now()}.png`);
-      if (!nextReferenceImage) {
-        return;
-      }
+  const handleContinueEdit = useCallback((conversationId: string, image: StoredImage | StoredReferenceImage) => {
+    const nextReferenceImage =
+      "dataUrl" in image
+        ? image
+        : buildReferenceImageFromResult(image, `conversation-${conversationId}-${Date.now()}.png`);
+    if (!nextReferenceImage) {
+      return;
+    }
 
-      setSelectedConversationId(conversationId);
-      setImageMode("edit");
-      setReferenceImages((prev) => [...prev, nextReferenceImage]);
-      setReferenceImageFiles((prev) => [
-        ...prev,
-        dataUrlToFile(nextReferenceImage.dataUrl, nextReferenceImage.name, nextReferenceImage.type),
-      ]);
-      setImagePrompt("");
-      textareaRef.current?.focus();
-      toast.success("已加入当前参考图，继续输入描述即可编辑");
-    },
-    [],
-  );
+    setSelectedConversationId(conversationId);
+    setImageMode("edit");
+    setReferenceImages((prev) => [...prev, nextReferenceImage]);
+    setReferenceImageFiles((prev) => [
+      ...prev,
+      dataUrlToFile(nextReferenceImage.dataUrl, nextReferenceImage.name, nextReferenceImage.type),
+    ]);
+    setImagePrompt("");
+    textareaRef.current?.focus();
+    toast.success("已加入当前参考图，继续输入描述即可编辑");
+  }, []);
 
   const handleUsePrompt = useCallback((prompt: string) => {
     setImagePrompt(prompt);
@@ -665,6 +689,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         return;
       }
 
+      const activeConversationQueueIds = activeConversationQueueIdsRef.current;
       if (activeConversationQueueIds.has(conversationId)) {
         return;
       }
@@ -720,6 +745,14 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         if (pendingImages.length === 0) {
           const existingFailedCount = queuedTurn.images.filter((image) => image.status === "error").length;
           const existingSuccessCount = queuedTurn.images.filter((image) => image.status === "success").length;
+          const nextStatus: ImageTurnStatus =
+            existingFailedCount > 0 ? "error" : existingSuccessCount > 0 ? "success" : "error";
+          const nextError =
+            existingFailedCount > 0
+              ? `其中 ${existingFailedCount} 张未成功生成`
+              : existingSuccessCount > 0
+                ? undefined
+                : "图片生成未完成";
           await updateConversation(conversationId, (current) => {
             if (!current) {
               return null;
@@ -732,8 +765,8 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
                 turn.id === queuedTurn.id
                   ? {
                       ...turn,
-                      status: existingFailedCount > 0 ? "error" : existingSuccessCount > 0 ? "success" : "queued",
-                      error: existingFailedCount > 0 ? `其中 ${existingFailedCount} 张未成功生成` : undefined,
+                      status: nextStatus,
+                      error: nextError,
                     }
                   : turn,
               ),
@@ -774,7 +807,11 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               height: typeof first.height === "number" ? first.height : undefined,
               targetSize: typeof first.target_size === "string" ? first.target_size : undefined,
               targetWidth:
-                typeof first.target_width === "number" ? first.target_width : first.target_width === null ? null : undefined,
+                typeof first.target_width === "number"
+                  ? first.target_width
+                  : first.target_width === null
+                    ? null
+                    : undefined,
               targetHeight:
                 typeof first.target_height === "number"
                   ? first.target_height
@@ -784,27 +821,24 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               targetAspectRatio: typeof first.target_aspect_ratio === "string" ? first.target_aspect_ratio : undefined,
             };
 
-            await updateConversation(
-              conversationId,
-              (current) => {
-                if (!current) {
-                  return null;
-                }
+            await updateConversation(conversationId, (current) => {
+              if (!current) {
+                return null;
+              }
 
-                return {
-                  ...current,
-                  updatedAt: new Date().toISOString(),
-                  turns: current.turns.map((turn) =>
-                    turn.id === queuedTurn.id
-                      ? {
-                          ...turn,
-                          images: turn.images.map((image) => (image.id === nextImage.id ? nextImage : image)),
-                        }
-                      : turn,
-                  ),
-                };
-              },
-            );
+              return {
+                ...current,
+                updatedAt: new Date().toISOString(),
+                turns: current.turns.map((turn) =>
+                  turn.id === queuedTurn.id
+                    ? {
+                        ...turn,
+                        images: turn.images.map((image) => (image.id === nextImage.id ? nextImage : image)),
+                      }
+                    : turn,
+                ),
+              };
+            });
 
             resumedSuccessCount += 1;
           } catch (error) {
@@ -911,16 +945,16 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
   );
 
   const drainConversationQueues = useCallback(async () => {
-    if (imageQueueDrainInProgress) {
+    if (imageQueueDrainInProgressRef.current) {
       return;
     }
 
-    imageQueueDrainInProgress = true;
+    imageQueueDrainInProgressRef.current = true;
     try {
-      while (isImageQueueOwnerActiveRef.current) {
+      while (isImageQueueOwnerActiveRef.current && imageQueueOwnerSessionKeyRef.current === sessionKey) {
         const nextConversation = conversationsRef.current.find(
           (conversation) =>
-            !activeConversationQueueIds.has(conversation.id) &&
+            !activeConversationQueueIdsRef.current.has(conversation.id) &&
             conversation.turns.some((turn) => turn.status === "queued"),
         );
         if (!nextConversation) {
@@ -930,9 +964,11 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         await runConversationQueue(nextConversation.id);
       }
     } finally {
-      imageQueueDrainInProgress = false;
+      if (imageQueueOwnerSessionKeyRef.current === sessionKey) {
+        imageQueueDrainInProgressRef.current = false;
+      }
     }
-  }, [runConversationQueue]);
+  }, [runConversationQueue, sessionKey]);
 
   useEffect(() => {
     void drainConversationQueues();
@@ -951,7 +987,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     }
 
     const targetConversation = selectedConversationId
-      ? conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null
+      ? (conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null)
       : null;
     const now = new Date().toISOString();
     const conversationId = targetConversation?.id ?? createId();
@@ -1126,9 +1162,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
           <DialogContent showCloseButton={false} className="rounded-2xl p-6">
             <DialogHeader className="gap-2">
               <DialogTitle>{deleteConfirmTitle}</DialogTitle>
-              <DialogDescription className="text-sm leading-6">
-                {deleteConfirmDescription}
-              </DialogDescription>
+              <DialogDescription className="text-sm leading-6">{deleteConfirmDescription}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteConfirm(null)}>

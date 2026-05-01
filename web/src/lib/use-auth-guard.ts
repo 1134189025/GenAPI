@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { fetchMe } from "@/lib/api";
+import { isAuthSessionChangedError, verifyStoredAuthSession } from "@/lib/auth-session";
 import {
-  clearStoredAuthSession,
   getDefaultRouteForRole,
   getStoredAuthSession,
-  setStoredAuthSession,
   type AuthRole,
   type StoredAuthSession,
 } from "@/store/auth";
@@ -43,16 +41,29 @@ export function useAuthGuard(allowedRoles?: AuthRole[]): UseAuthGuardResult {
 
       let verifiedSession: StoredAuthSession;
       try {
-        const data = await fetchMe(false);
-        verifiedSession = {
-          key: storedSession.key,
-          role: data.user.role,
-          subjectId: data.user.id,
-          name: data.user.email,
-        };
-        await setStoredAuthSession(verifiedSession);
-      } catch {
-        await clearStoredAuthSession();
+        verifiedSession = await verifyStoredAuthSession(storedSession);
+      } catch (error) {
+        if (isAuthSessionChangedError(error)) {
+          const changedSession = error.latestSession;
+          if (!active) {
+            return;
+          }
+          if (!changedSession) {
+            setSession(null);
+            setIsCheckingAuth(false);
+            router.replace("/login");
+            return;
+          }
+          if (roleList.length > 0 && !roleList.includes(changedSession.role)) {
+            setSession(changedSession);
+            setIsCheckingAuth(false);
+            router.replace(getDefaultRouteForRole(changedSession.role));
+            return;
+          }
+          setSession(changedSession);
+          setIsCheckingAuth(false);
+          return;
+        }
         if (!active) {
           return;
         }
@@ -94,31 +105,34 @@ export function useRedirectIfAuthenticated() {
     let active = true;
 
     const load = async () => {
-      const storedSession = await getStoredAuthSession();
-      if (!active) {
-        return;
-      }
+      let didRedirect = false;
+      try {
+        const storedSession = await getStoredAuthSession();
+        if (!active) {
+          return;
+        }
 
-      if (storedSession) {
-        try {
-          const data = await fetchMe(false);
-          const verifiedSession: StoredAuthSession = {
-            key: storedSession.key,
-            role: data.user.role,
-            subjectId: data.user.id,
-            name: data.user.email,
-          };
-          await setStoredAuthSession(verifiedSession);
+        if (storedSession) {
+          const verifiedSession = await verifyStoredAuthSession(storedSession);
           if (active) {
             router.replace(getDefaultRouteForRole(verifiedSession.role));
+            didRedirect = true;
           }
           return;
-        } catch {
-          await clearStoredAuthSession();
+        }
+      } catch (error) {
+        if (isAuthSessionChangedError(error)) {
+          if (active && error.latestSession) {
+            router.replace(getDefaultRouteForRole(error.latestSession.role));
+            didRedirect = true;
+          }
+          return;
+        }
+      } finally {
+        if (active && !didRedirect) {
+          setIsCheckingAuth(false);
         }
       }
-
-      setIsCheckingAuth(false);
     };
 
     void load();

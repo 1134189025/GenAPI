@@ -122,7 +122,7 @@ export function ImageComposer({
     <div
       className={cn(
         "shrink-0 px-0 sm:px-1",
-        reserveMobileBottomNav ? "pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-2" : "pb-2",
+        reserveMobileBottomNav ? "pb-[calc(3.75rem+env(safe-area-inset-bottom))] lg:pb-2" : "pb-2",
       )}
     >
       <div className="mx-auto w-full max-w-[920px]">

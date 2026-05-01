@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.support import extract_bearer_token, require_admin, require_identity
 from services.email_service import email_service
-from services.user_service import UserServiceError, parse_optional_datetime, user_service
+from services.user_service import UserServiceError, clean_string, parse_optional_datetime, user_service
 
 
 class SetupAdminRequest(BaseModel):
@@ -134,7 +134,7 @@ def reject_self_admin_status_change(
     updates: dict[str, object] | None = None,
     delete_self: bool = False,
 ) -> None:
-    if str(actor.get("id") or "") != str(target_user_id):
+    if clean_string(actor.get("id")) != clean_string(target_user_id):
         return
     payload = dict(updates or {})
     if delete_self:
@@ -276,9 +276,10 @@ def create_router(app_version: str) -> APIRouter:
     async def update_user(user_id: str, body: AdminUserUpdateRequest, authorization: str | None = Header(default=None)):
         identity = require_admin(authorization)
         try:
+            normalized_user_id = clean_string(user_id)
             updates = body.model_dump(mode="python", exclude_unset=True)
-            reject_self_admin_status_change(actor=identity, target_user_id=user_id, updates=updates)
-            item = user_service.update_user(user_id, updates)
+            reject_self_admin_status_change(actor=identity, target_user_id=normalized_user_id, updates=updates)
+            item = user_service.update_user(normalized_user_id, updates)
             return {"item": item, "items": user_service.list_users()}
         except UserServiceError as exc:
             raise_user_error(exc)
@@ -287,8 +288,9 @@ def create_router(app_version: str) -> APIRouter:
     async def delete_user(user_id: str, authorization: str | None = Header(default=None)):
         identity = require_admin(authorization)
         try:
-            reject_self_admin_status_change(actor=identity, target_user_id=user_id, delete_self=True)
-            user_service.delete_user(user_id)
+            normalized_user_id = clean_string(user_id)
+            reject_self_admin_status_change(actor=identity, target_user_id=normalized_user_id, delete_self=True)
+            user_service.delete_user(normalized_user_id)
             return {"items": user_service.list_users()}
         except UserServiceError as exc:
             raise_user_error(exc)

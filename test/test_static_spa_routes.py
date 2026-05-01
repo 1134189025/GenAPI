@@ -17,6 +17,9 @@ class StaticSpaRouteTests(unittest.TestCase):
         self.web_dist = base / "web_dist"
         self.web_dist.mkdir(parents=True)
         (self.web_dist / "index.html").write_text("<!doctype html><title>Genapi</title>", encoding="utf-8")
+        next_static = self.web_dist / "_next" / "static" / "chunks"
+        next_static.mkdir(parents=True)
+        (next_static / "current.js").write_text("console.log('current')", encoding="utf-8")
         self.old_config_file = os.environ.get("GENAPI_CONFIG_FILE")
         self.old_user_db = os.environ.get("GENAPI_USER_DATABASE_URL")
         self.old_jwt_secret = os.environ.get("JWT_SECRET")
@@ -60,6 +63,33 @@ class StaticSpaRouteTests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.head(path)
                 self.assertEqual(response.status_code, 200, response.text)
+                self.assertIn("no-cache", response.headers.get("cache-control", ""))
+
+    def test_stale_next_js_chunk_refreshes_instead_of_hard_404(self) -> None:
+        response = self.client.get("/_next/static/chunks/missing-old.js")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("text/javascript", response.headers.get("content-type", ""))
+        self.assertEqual(response.headers.get("cache-control"), "no-store")
+        self.assertIn("location.reload", response.text)
+
+        existing = self.client.get("/_next/static/chunks/current.js")
+        self.assertEqual(existing.status_code, 200, existing.text)
+        self.assertIn("max-age=31536000", existing.headers.get("cache-control", ""))
+
+        missing_css = self.client.get("/_next/static/chunks/missing-old.css")
+        self.assertEqual(missing_css.status_code, 404, missing_css.text)
+
+    def test_missing_extension_assets_and_api_roots_do_not_fallback(self) -> None:
+        for path in ("/assets/missing.css", "/missing.png", "/favicon.ico"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 404, response.text)
+                self.assertNotIn("text/html", response.headers.get("content-type", ""))
+
+        for path in ("/api", "/api/", "/v1", "/v1/", "/auth/login"):
+            with self.subTest(path=path):
+                response = self.client.head(path)
+                self.assertEqual(response.status_code, 404, response.text)
 
     def test_web_dist_resolves_from_pyinstaller_resource_dir(self) -> None:
         support_module = sys.modules["api.support"]

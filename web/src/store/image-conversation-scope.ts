@@ -12,6 +12,10 @@ export function getImageConversationStorageKey(ownerId: string) {
   return `items:${getImageConversationOwnerKey(ownerId)}`;
 }
 
+export function getImageConversationDeletedStorageKey(ownerId: string) {
+  return `deleted:${getImageConversationOwnerKey(ownerId)}`;
+}
+
 export function getScopedImagePreferenceStorageKey(baseKey: string, ownerId: string) {
   return `${baseKey}:${getImageConversationOwnerKey(ownerId)}`;
 }
