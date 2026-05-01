@@ -291,8 +291,8 @@ export default function MembershipPage() {
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="text-xs font-semibold text-slate-500">下次可签</div>
-                <div className="mt-2 text-sm font-bold text-slate-950">{nextAvailableAt}</div>
-                <div className="mt-1 text-xs text-slate-500">{checkinTimezone}</div>
+                <div className="mt-2 break-words text-sm font-bold text-slate-950">{nextAvailableAt}</div>
+                <div className="mt-1 break-words text-xs text-slate-500">{checkinTimezone}</div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="text-xs font-semibold text-slate-500">连续奖励</div>
@@ -316,13 +316,13 @@ export default function MembershipPage() {
             <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
               <div className="flex items-center gap-2">
                 <Badge variant="warning" className="rounded-md">有效会员</Badge>
-                <span className="text-sm font-bold text-slate-900">{activeMembership.plan_name}</span>
+                <span className="min-w-0 break-words text-sm font-bold text-slate-900">{activeMembership.plan_name}</span>
               </div>
               <div className="mt-4 text-sm leading-6 text-slate-600">
                 每 {activeMembership.period_days} 天刷新 {activeMembership.period_image_quota} 张会员图片额度，有效期 {activeMembership.duration_days} 天。
               </div>
             </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-600">
+            <div className="break-words rounded-3xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-600">
               <div>激活时间：{formatDate(activeMembership.activated_at)}</div>
               <div>周期结束：{formatDate(activeMembership.current_period_ends_at)}</div>
               <div>会员到期：{formatDate(activeMembership.expires_at)}</div>
@@ -349,16 +349,25 @@ export default function MembershipPage() {
           {plans.map((plan) => (
             <div key={plan.id} className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-black text-slate-950">{plan.name}</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{plan.description || "管理员暂未填写说明。"}</p>
+                <div className="min-w-0">
+                  <h3 className="break-words text-lg font-black text-slate-950">{plan.name}</h3>
+                  <p className="mt-1 break-words text-sm leading-6 text-slate-500">{plan.description || "管理员暂未填写说明。"}</p>
                 </div>
                 <Badge variant="success" className="rounded-md">可兑换</Badge>
               </div>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-semibold text-slate-500">
-                <div className="rounded-2xl bg-slate-50 p-3"><div className="text-lg font-black text-slate-950">{plan.duration_days}</div>有效天数</div>
-                <div className="rounded-2xl bg-slate-50 p-3"><div className="text-lg font-black text-slate-950">{plan.period_days}</div>周期天数</div>
-                <div className="rounded-2xl bg-slate-50 p-3"><div className="text-lg font-black text-slate-950">{plan.period_image_quota}</div>周期额度</div>
+              <div className="mt-4 grid gap-2 text-xs font-semibold text-slate-500 sm:grid-cols-3">
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 sm:block sm:text-center">
+                  <div className="break-words text-lg font-black text-slate-950">{plan.duration_days}</div>
+                  有效天数
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 sm:block sm:text-center">
+                  <div className="break-words text-lg font-black text-slate-950">{plan.period_days}</div>
+                  周期天数
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 sm:block sm:text-center">
+                  <div className="break-words text-lg font-black text-slate-950">{plan.period_image_quota}</div>
+                  周期额度
+                </div>
               </div>
             </div>
           ))}

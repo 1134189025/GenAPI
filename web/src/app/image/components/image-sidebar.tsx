@@ -75,7 +75,7 @@ export function ImageSidebar({
                   <button
                     type="button"
                     onClick={() => onSelectConversation(conversation.id)}
-                    className="block w-full pr-8 text-left"
+                    className="block w-full pr-12 sm:pr-8 text-left"
                   >
                     <div className="truncate text-sm font-semibold">
                       <span className="truncate">{conversation.title}</span>
@@ -97,7 +97,7 @@ export function ImageSidebar({
                   <button
                     type="button"
                     onClick={() => void onDeleteConversation(conversation.id)}
-                    className="absolute top-3 right-2 inline-flex size-7 items-center justify-center rounded-md text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-rose-500 group-hover:opacity-100"
+                    className="absolute top-2 right-2 inline-flex size-9 sm:size-7 touch-manipulation items-center justify-center rounded-full text-stone-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition hover:bg-stone-100 hover:text-rose-500 sm:top-3 sm:rounded-md sm:text-stone-400"
                     aria-label="删除会话"
                   >
                     <Trash2 className="size-4" />

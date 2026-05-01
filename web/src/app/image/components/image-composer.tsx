@@ -95,7 +95,7 @@ export function ImageComposer({
   };
 
   return (
-    <div className="shrink-0 px-1 pb-2">
+    <div className="shrink-0 px-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-1 lg:pb-2">
       <div className="mx-auto w-full max-w-[920px]">
         {mode === "edit" ? (
           <input
@@ -111,9 +111,9 @@ export function ImageComposer({
         ) : null}
 
         {mode === "edit" && referenceImages.length > 0 ? (
-          <div className="mb-3 flex flex-wrap gap-2 px-1">
+          <div className="mb-3 flex max-h-[5rem] flex-nowrap gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1 sm:max-h-[9rem] sm:flex-wrap sm:overflow-x-hidden sm:overflow-y-auto sm:overscroll-contain">
             {referenceImages.map((image, index) => (
-              <div key={`${image.name}-${index}`} className="relative size-16">
+              <div key={`${image.name}-${index}`} className="relative size-16 flex-none">
                 <button
                   type="button"
                   onClick={() => {
@@ -135,7 +135,7 @@ export function ImageComposer({
                     event.stopPropagation();
                     onRemoveReferenceImage(index);
                   }}
-                  className="absolute -right-1 -top-1 inline-flex size-5 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:text-stone-800"
+                  className="absolute right-1 top-1 inline-flex size-6 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm transition hover:border-stone-300 hover:text-stone-800 sm:size-5"
                   aria-label={`移除参考图 ${image.name || index + 1}`}
                 >
                   <X className="size-3" />
@@ -145,7 +145,7 @@ export function ImageComposer({
           </div>
         ) : null}
 
-        <div className="rounded-[30px] border border-stone-200 bg-white/95 shadow-[0_18px_60px_-36px_rgba(28,25,23,0.45)] backdrop-blur">
+        <div className="rounded-[24px] border border-stone-200 bg-white/95 shadow-[0_18px_60px_-36px_rgba(28,25,23,0.45)] backdrop-blur sm:rounded-[30px]">
           <div
             className="relative cursor-text"
             onClick={() => {
@@ -173,7 +173,7 @@ export function ImageComposer({
                   void onSubmit();
                 }
               }}
-              className="min-h-[104px] resize-none rounded-[30px] border-0 bg-transparent px-5 pt-5 pb-3 text-[15px] leading-7 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:min-h-[116px] sm:px-6"
+              className="max-h-[32dvh] min-h-[76px] resize-none rounded-[24px] border-0 bg-transparent px-4 pt-4 pb-3 text-[15px] leading-7 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:min-h-[116px] sm:rounded-[30px] sm:px-6 sm:pt-5"
             />
 
             <div className="border-t border-stone-100 px-3 py-3 sm:px-4">
@@ -192,7 +192,7 @@ export function ImageComposer({
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                      className="h-9 touch-manipulation rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
                       onClick={onPickReferenceImage}
                     >
                       <ImagePlus className="size-3.5 sm:size-4" />
@@ -200,7 +200,12 @@ export function ImageComposer({
                     </Button>
                   ) : null}
 
-                  <div className="flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-2 sm:px-3 sm:py-1">
+                  <div
+                    className={cn(
+                      "items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-2 sm:px-3 sm:py-1",
+                      isMoreSettingsOpen ? "flex" : "hidden sm:flex",
+                    )}
+                  >
                     <span className="text-[11px] font-medium text-stone-700 sm:text-sm">张数</span>
                     <Input
                       type="number"
@@ -214,19 +219,22 @@ export function ImageComposer({
                   </div>
                   <div
                     ref={sizeMenuRef}
-                    className="relative flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
+                    className={cn(
+                      "relative items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]",
+                      isMoreSettingsOpen ? "flex" : "hidden sm:flex",
+                    )}
                   >
                     <span className="font-medium text-stone-700 sm:text-sm">尺寸</span>
                     <button
                       type="button"
-                      className="flex h-7 w-[98px] items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 sm:h-8 sm:w-[128px]"
+                      className="flex h-7 w-[112px] max-w-[calc(100vw-8rem)] touch-manipulation items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 sm:h-8 sm:w-[128px] sm:max-w-none"
                       onClick={() => setIsSizeMenuOpen((open) => !open)}
                     >
                       <span className="truncate">{imageSizeLabel}</span>
                       <ChevronDown className={cn("size-4 shrink-0 opacity-60 transition", isSizeMenuOpen && "rotate-180")} />
                     </button>
                     {isSizeMenuOpen ? (
-                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-50 w-[170px] overflow-hidden rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:w-[186px]">
+                      <div className="absolute right-0 bottom-[calc(100%+10px)] z-50 max-h-[min(16rem,calc(100dvh-12rem))] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:right-auto sm:left-0 sm:w-[186px]">
                         {imageSizeOptions.map((option) => {
                           const active = option.value === imageSize;
                           return (
@@ -254,7 +262,7 @@ export function ImageComposer({
                   <button
                     type="button"
                     className={cn(
-                      "rounded-full px-3 py-2 text-xs font-medium transition sm:text-sm",
+                      "touch-manipulation rounded-full px-3 py-2 text-xs font-medium transition sm:text-sm",
                       isMoreSettingsOpen ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200",
                     )}
                     onClick={() => setIsMoreSettingsOpen((open) => !open)}
@@ -267,7 +275,7 @@ export function ImageComposer({
                   type="button"
                   onClick={() => void onSubmit()}
                   disabled={!prompt.trim() || (mode === "edit" && referenceImages.length === 0)}
-                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-11"
+                  className="inline-flex size-10 shrink-0 touch-manipulation items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-11"
                   aria-label={mode === "edit" ? "编辑图片" : "生成图片"}
                 >
                   <ArrowUp className="size-3.5 sm:size-4" />
@@ -309,7 +317,7 @@ function ModeButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm",
+        "touch-manipulation rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm",
         active ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-900",
       )}
     >

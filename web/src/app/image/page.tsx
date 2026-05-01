@@ -1008,7 +1008,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
   return (
     <>
-      <section className="relative mx-auto flex h-[calc(100vh-5rem)] min-h-0 w-full max-w-[1180px] flex-col px-3 pb-4 sm:px-5">
+      <section className="relative mx-auto flex h-[calc(100dvh-4.75rem)] min-h-0 w-full max-w-[1180px] flex-col overflow-hidden px-3 pb-0 sm:h-[calc(100vh-5rem)] sm:px-5 sm:pb-4">
         <div className="pointer-events-none absolute inset-x-4 top-2 -z-10 h-40 rounded-full bg-[radial-gradient(circle_at_center,rgba(214,211,209,0.55),transparent_70%)] blur-3xl" />
         <div className="flex shrink-0 items-center justify-between gap-3 py-3">
           <div className="min-w-0">
@@ -1029,6 +1029,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
               variant="outline"
               className="h-10 rounded-full border-stone-200 bg-white/85 px-3 text-stone-700 shadow-sm sm:px-4"
               onClick={() => setIsHistoryOpen(true)}
+              aria-label="打开历史记录"
             >
               <History className="size-4 sm:mr-2" />
               <span className="hidden sm:inline">历史</span>
@@ -1037,6 +1038,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
             <Button
               className="h-10 rounded-full bg-stone-950 px-3 text-white shadow-sm hover:bg-stone-800 sm:px-4"
               onClick={handleCreateDraft}
+              aria-label="新建图片对话"
             >
               <Plus className="size-4 sm:mr-2" />
               <span className="hidden sm:inline">新建</span>
@@ -1046,7 +1048,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
         <div
           ref={resultsViewportRef}
-          className="hide-scrollbar min-h-0 flex-1 overflow-y-auto rounded-[34px] border border-stone-200/70 bg-stone-50/50 px-2 py-4 sm:px-5 sm:py-6"
+          className="hide-scrollbar -mx-3 min-h-0 flex-1 overscroll-contain overflow-y-auto bg-stone-50/50 px-3 py-4 sm:mx-0 sm:rounded-[34px] sm:border sm:border-stone-200/70 sm:px-5 sm:py-6"
         >
           <ImageResults
             selectedConversation={selectedConversation}
@@ -1057,7 +1059,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
           />
         </div>
 
-        <div className="shrink-0 pt-3">
+        <div className="relative z-20 shrink-0 pt-3">
           <ImageComposer
             mode={imageMode}
             prompt={imagePrompt}
@@ -1081,14 +1083,15 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
       </section>
 
       <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent className="flex h-[82vh] w-[92vw] max-w-[440px] flex-col overflow-hidden rounded-[32px] border-stone-200 bg-white p-0 shadow-2xl">
+        <DialogContent className="flex h-[min(82dvh,720px)] w-[calc(100vw-1rem)] max-w-[440px] flex-col overflow-hidden rounded-[32px] border-stone-200 bg-white p-0 shadow-2xl sm:w-[92vw]">
           <DialogHeader className="px-6 pt-6 pb-2">
             <DialogTitle className="flex items-center gap-2 text-lg font-bold">
               <History className="size-5" />
               历史记录
             </DialogTitle>
+            <DialogDescription className="sr-only">选择历史图片对话，或创建新的图片对话。</DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-6">
             <ImageSidebar
               conversations={conversations}
               isLoadingHistory={isLoadingHistory}

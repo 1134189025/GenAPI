@@ -3,13 +3,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ImageIcon, LoaderCircle, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, ImageIcon, LoaderCircle, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/common/page-header";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   deleteGalleryImage,
   fetchGalleryImageContentBlob,
@@ -127,6 +128,7 @@ export default function GalleryPage() {
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<GalleryImage | null>(null);
 
   const lightboxImages = useMemo(
     () =>
@@ -216,6 +218,7 @@ export default function GalleryPage() {
     setBusyIds({});
     setLightboxOpen(false);
     setLightboxIndex(0);
+    setPendingDeleteItem(null);
   }, [revokeAllPreviewUrls, syncItemRefs]);
 
   const setFirstPageItems = useCallback(
@@ -451,6 +454,7 @@ export default function GalleryPage() {
         await deleteGalleryImage(item.id);
         deletedItemIdsRef.current.add(item.id);
         removeGalleryItem(item.id);
+        setPendingDeleteItem(null);
         toast.success("已删除图片");
       } catch (deleteError) {
         toast.error(galleryErrorMessage(deleteError, "删除图片失败"));
@@ -502,6 +506,7 @@ export default function GalleryPage() {
 
   const showInitialLoading = isInitialLoading && items.length === 0;
   const canLoadMore = hasMore && Boolean(nextCursor);
+  const pendingDeleteBusy = pendingDeleteItem ? Boolean(busyIds[pendingDeleteItem.id]) : false;
 
   return (
     <section className="space-y-6">
@@ -622,21 +627,21 @@ export default function GalleryPage() {
                         <span>到期 {formatDate(item.expires_at)}</span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Button variant="outline" size="sm" className="h-9 rounded-xl" disabled={busy} onClick={() => void handleDownload(item)}>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <Button variant="outline" size="sm" className="h-11 rounded-xl sm:h-9" disabled={busy} onClick={() => void handleDownload(item)}>
                         {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
                         下载
                       </Button>
-                      <Button variant="outline" size="sm" className="h-9 rounded-xl" disabled={busy} onClick={() => void handleContinueEdit(item)}>
+                      <Button variant="outline" size="sm" className="h-11 rounded-xl sm:h-9" disabled={busy} onClick={() => void handleContinueEdit(item)}>
                         <Sparkles className="size-4" />
                         编辑
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-9 rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                        className="h-11 rounded-xl sm:h-9 border-rose-200 text-rose-700 hover:bg-rose-50"
                         disabled={busy}
-                        onClick={() => void handleDelete(item)}
+                        onClick={() => setPendingDeleteItem(item)}
                       >
                         <Trash2 className="size-4" />
                         删除
@@ -677,6 +682,41 @@ export default function GalleryPage() {
         onOpenChange={setLightboxOpen}
         onIndexChange={setLightboxIndex}
       />
+
+      <Dialog
+        open={Boolean(pendingDeleteItem)}
+        onOpenChange={(open) => {
+          if (!open && !pendingDeleteBusy) setPendingDeleteItem(null);
+        }}
+      >
+        <DialogContent className="w-[min(92vw,420px)]">
+          <DialogHeader>
+            <div className="mb-1 grid size-11 place-items-center rounded-2xl bg-rose-50 text-rose-700">
+              <AlertTriangle className="size-5" />
+            </div>
+            <DialogTitle>确认删除图片</DialogTitle>
+            <DialogDescription className="leading-6">
+              删除后这张图库图片会从当前列表移除，请确认不再需要下载或继续编辑。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" className="h-11 rounded-xl" disabled={pendingDeleteBusy} onClick={() => setPendingDeleteItem(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              className="h-11 rounded-xl"
+              disabled={!pendingDeleteItem || pendingDeleteBusy}
+              onClick={() => {
+                if (pendingDeleteItem) void handleDelete(pendingDeleteItem);
+              }}
+            >
+              {pendingDeleteBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

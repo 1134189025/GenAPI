@@ -136,6 +136,47 @@ function SidebarContent({
   );
 }
 
+function MobileUserBottomNavigation({ pathname }: { pathname: string }) {
+  const normalizedPath = normalizeDashboardPath(pathname);
+  const items = getNavigationGroups("user").flatMap((group) => group.items);
+
+  return (
+    <nav
+      aria-label="移动端用户导航"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/92 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-18px_50px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl lg:hidden"
+    >
+      <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
+        {items.map((item) => {
+          const Icon = iconMap[item.icon];
+          const active = normalizedPath === item.href || pathname === item.href;
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "group flex min-w-0 flex-col items-center gap-1 rounded-2xl px-1.5 py-1.5 text-[11px] font-bold transition",
+                active ? "bg-teal-50 text-teal-700" : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-900",
+              )}
+            >
+              <span
+                className={cn(
+                  "grid size-8 place-items-center rounded-xl transition",
+                  active ? "bg-teal-500 text-white shadow-sm" : "bg-slate-50 text-slate-400 group-hover:text-teal-600",
+                )}
+              >
+                <Icon className="size-4" />
+              </span>
+              <span className="block w-full truncate text-center leading-4">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -206,15 +247,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const normalizedPath = normalizeDashboardPath(pathname);
+  const isImageWorkspace = normalizedPath === "/image";
+
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
+    <main className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-950">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(20,184,166,0.13),transparent_28%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.1),transparent_28%),linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:auto,auto,64px_64px,64px_64px]" />
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-slate-200/80 bg-white/88 backdrop-blur-xl lg:block">
         <SidebarContent session={session} pathname={pathname} />
       </aside>
 
-      {mobileOpen ? (
+      {session.role === "admin" && mobileOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
@@ -236,18 +280,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
 
-      <div className="relative flex min-h-screen flex-col lg:pl-72">
+      <div className="relative flex min-h-screen min-w-0 flex-col overflow-x-hidden lg:pl-72">
         <header className="sticky top-0 z-30 border-b border-white/70 bg-white/78 backdrop-blur-xl">
           <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                className="grid size-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm lg:hidden"
-                onClick={() => setMobileOpen(true)}
-                aria-label="打开菜单"
-              >
-                <Menu className="size-5" />
-              </button>
+              {session.role === "admin" ? (
+                <button
+                  type="button"
+                  className="grid size-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm lg:hidden"
+                  onClick={() => setMobileOpen(true)}
+                  aria-label="打开菜单"
+                >
+                  <Menu className="size-5" />
+                </button>
+              ) : null}
               <div className="min-w-0">
                 <h1 className="truncate text-base font-black tracking-tight text-slate-950 md:text-lg">
                   {meta.title}
@@ -270,8 +316,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        <div className="flex-1 px-4 py-5 md:px-6 lg:px-8">
-          <div className="mx-auto max-w-[1540px] animate-in fade-in slide-in-from-bottom-2 duration-300">{children}</div>
+        <div
+          className={cn(
+            "min-w-0 flex-1 px-4 md:px-6 lg:px-8",
+            isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5" : "pt-5",
+            !isImageWorkspace && session.role === "user"
+              ? "pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-5"
+              : !isImageWorkspace
+                ? "pb-5"
+                : "",
+          )}
+        >
+          <div className="mx-auto min-w-0 max-w-[1540px] animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {children}
+          </div>
         </div>
         <button
           type="button"
@@ -281,6 +339,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <ChevronLeft className="size-4 rotate-90" />
         </button>
+        {session.role === "user" ? <MobileUserBottomNavigation pathname={pathname} /> : null}
       </div>
     </main>
   );

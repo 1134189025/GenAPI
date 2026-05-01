@@ -61,14 +61,14 @@ export function AuthShell({
   const styles = toneStyles[tone];
 
   return (
-    <div className="relative isolate h-screen w-full overflow-y-auto overflow-x-hidden px-4 py-6 text-slate-950 sm:py-8">
+    <div className="relative isolate min-h-dvh w-full overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] text-slate-950 sm:pt-[max(2rem,env(safe-area-inset-top))] sm:pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_12%_12%,rgba(20,184,166,0.20),transparent_28%),radial-gradient(circle_at_86%_8%,rgba(14,165,233,0.16),transparent_27%),radial-gradient(circle_at_52%_78%,rgba(16,185,129,0.14),transparent_30%),linear-gradient(135deg,rgba(248,250,252,0.99),rgba(240,253,250,0.92)_45%,rgba(226,232,240,0.98))]" />
       <div className="absolute inset-0 -z-10 bg-[linear-gradient(rgba(15,23,42,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.045)_1px,transparent_1px)] bg-[size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_36%,transparent_78%)]" />
       <div className="pointer-events-none absolute -left-24 top-20 -z-10 h-72 w-72 rounded-full bg-teal-300/20 blur-3xl" />
       <div className="pointer-events-none absolute -right-28 bottom-16 -z-10 h-80 w-80 rounded-full bg-sky-300/20 blur-3xl" />
       <div className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-white/20 shadow-[inset_0_0_80px_rgba(255,255,255,0.35)]" />
 
-      <div className="relative z-10 mx-auto flex min-h-full w-full items-center justify-center">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100dvh_-_3rem)] w-full items-start justify-center sm:items-center">
         <div className={cn("w-full", maxWidth)}>
           <div className="mb-6 text-center">
             <div
