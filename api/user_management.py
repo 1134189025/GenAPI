@@ -203,6 +203,22 @@ def create_router(app_version: str) -> APIRouter:
     async def me(authorization: str | None = Header(default=None)):
         return {"user": require_identity(authorization)}
 
+    @router.get("/api/checkin/status")
+    async def checkin_status(authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        try:
+            return await run_in_threadpool(user_service.get_checkin_status, str(identity.get("id") or ""))
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
+    @router.post("/api/checkin")
+    async def checkin(authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        try:
+            return await run_in_threadpool(user_service.checkin, str(identity.get("id") or ""))
+        except UserServiceError as exc:
+            raise_user_error(exc)
+
     @router.post("/api/auth/logout")
     async def logout(authorization: str | None = Header(default=None)):
         token = extract_bearer_token(authorization)

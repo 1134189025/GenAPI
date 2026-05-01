@@ -6,14 +6,16 @@ const httpRequest = mock(async (path: string) => {
   }
   return {};
 });
+const httpBlobRequest = mock(async () => new Blob());
 
-mock.module("../src/lib/request", () => ({ httpRequest }));
-mock.module("@/lib/request", () => ({ httpRequest }));
+mock.module("../src/lib/request", () => ({ httpBlobRequest, httpRequest }));
+mock.module("@/lib/request", () => ({ httpBlobRequest, httpRequest }));
 
 const api = await import("../src/lib/api");
 
 beforeEach(() => {
   httpRequest.mockClear();
+  httpBlobRequest.mockClear();
 });
 
 describe("frontend backend API contracts", () => {
@@ -58,6 +60,16 @@ describe("frontend backend API contracts", () => {
       ["/api/admin/update/status?force=true"],
       ["/api/admin/update/start", { method: "POST" }],
       ["/api/admin/update/jobs/job-a"],
+    ]);
+  });
+
+  test("exposes daily checkin API contracts", async () => {
+    await api.fetchCheckinStatus();
+    await api.claimDailyCheckin();
+
+    expect(httpRequest.mock.calls).toEqual([
+      ["/api/checkin/status"],
+      ["/api/checkin", { method: "POST" }],
     ]);
   });
 });

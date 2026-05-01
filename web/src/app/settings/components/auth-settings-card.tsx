@@ -56,7 +56,7 @@ export function AuthSettingsCard() {
 
   if (isLoading) {
     return (
-      <DataPanel title="注册与认证设置" description="正在读取邮箱验证、邀请码、默认额度和 SMTP 配置。">
+      <DataPanel title="注册与认证设置" description="正在读取邮箱验证、邀请码、签到奖励、默认额度和 SMTP 配置。">
         <div className="p-5">
           <EmptyState
             title="正在加载认证设置"
@@ -73,7 +73,7 @@ export function AuthSettingsCard() {
   return (
     <DataPanel
       title="注册与认证设置"
-      description="配置邮箱验证、邀请码、优惠码、默认图片额度和 SMTP。SMTP 密码留空会保留旧密码。"
+      description="配置邮箱验证、邀请码、优惠码、签到奖励、默认图片额度和 SMTP。SMTP 密码留空会保留旧密码。"
       toolbar={
         <>
             <Button asChild variant="outline" className="h-9 rounded-xl border-stone-200 bg-white">
@@ -112,6 +112,68 @@ export function AuthSettingsCard() {
               />
             </label>
           ))}
+        </div>
+
+        <div className="space-y-4 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
+          <div>
+            <h3 className="text-sm font-bold text-stone-900">签到奖励</h3>
+            <p className="mt-1 text-xs leading-5 text-stone-500">控制用户每日签到普通图片额度，以及连续签到额外奖励。</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <label className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+              启用签到
+              <Checkbox
+                checked={settings.checkin_enabled}
+                onCheckedChange={(checked) => patch({ checkin_enabled: Boolean(checked) })}
+              />
+            </label>
+            <label className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+              连续签到
+              <Checkbox
+                checked={settings.checkin_streak_bonus_enabled}
+                onCheckedChange={(checked) => patch({ checkin_streak_bonus_enabled: Boolean(checked) })}
+              />
+            </label>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">每日奖励</label>
+              <Input
+                value={String(settings.checkin_daily_image_quota)}
+                type="number"
+                min={0}
+                onChange={(event) => patch({ checkin_daily_image_quota: Number(event.target.value) || 0 })}
+                className="h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">连续天数</label>
+              <Input
+                value={String(settings.checkin_streak_bonus_days)}
+                type="number"
+                min={1}
+                onChange={(event) => patch({ checkin_streak_bonus_days: Number(event.target.value) || 1 })}
+                className="h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">额外奖励</label>
+              <Input
+                value={String(settings.checkin_streak_bonus_image_quota)}
+                type="number"
+                min={0}
+                onChange={(event) => patch({ checkin_streak_bonus_image_quota: Number(event.target.value) || 0 })}
+                className="h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-stone-700">签到时区</label>
+              <Input
+                value={settings.checkin_timezone}
+                onChange={(event) => patch({ checkin_timezone: event.target.value })}
+                placeholder="Asia/Shanghai"
+                className="h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

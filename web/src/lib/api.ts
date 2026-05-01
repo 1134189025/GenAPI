@@ -196,6 +196,48 @@ export type UserMembership = {
   current_period_ends_at: string | null;
 };
 
+export type CheckinRecord = {
+  id: string;
+  user_id: string;
+  checkin_date: string;
+  reward_image_quota: number;
+  bonus_image_quota?: number;
+  streak_days: number;
+  created_at: string;
+  [key: string]: unknown;
+};
+
+export type CheckinStatus = {
+  enabled?: boolean;
+  checkin_enabled?: boolean;
+  can_checkin?: boolean;
+  checked_in_today: boolean;
+  already_checked_in?: boolean;
+  today_reward_image_quota?: number;
+  reward_image_quota?: number;
+  current_streak_days?: number;
+  streak_days?: number;
+  next_available_at?: string | null;
+  next_checkin_at?: string | null;
+  checkin_date?: string;
+  last_checkin_date?: string | null;
+  daily_image_quota: number;
+  streak_bonus_enabled: boolean;
+  streak_bonus_days: number;
+  streak_bonus_image_quota: number;
+  timezone: string;
+  latest_record?: CheckinRecord | null;
+  last_record?: CheckinRecord | null;
+  [key: string]: unknown;
+};
+
+export type CheckinStatusResponse = {
+  status?: CheckinStatus;
+  record?: CheckinRecord | null;
+  user?: ManagedUser;
+  [key: string]: unknown;
+} & Partial<CheckinStatus>;
+
 export type MembershipPlan = {
   id: string;
   name: string;
@@ -215,6 +257,12 @@ export type AuthSettings = {
   email_verification_enabled: boolean;
   invitation_required: boolean;
   promo_codes_enabled: boolean;
+  checkin_enabled: boolean;
+  checkin_daily_image_quota: number;
+  checkin_streak_bonus_enabled: boolean;
+  checkin_streak_bonus_days: number;
+  checkin_streak_bonus_image_quota: number;
+  checkin_timezone: string;
   email_domain_whitelist: string[];
   default_image_quota: number;
   default_image_concurrency: number;
@@ -657,6 +705,14 @@ export async function fetchMembershipPlans() {
 
 export async function fetchUserMembership() {
   return httpRequest<{ membership: UserMembership | null; user: ManagedUser }>("/api/membership/me");
+}
+
+export async function fetchCheckinStatus() {
+  return httpRequest<CheckinStatusResponse>("/api/checkin/status");
+}
+
+export async function claimDailyCheckin() {
+  return httpRequest<CheckinStatusResponse>("/api/checkin", { method: "POST" });
 }
 
 export async function fetchAdminMembershipPlans() {

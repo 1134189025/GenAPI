@@ -8,10 +8,11 @@ import re
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import jwt
 from argon2 import PasswordHasher
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Boolean,
     case,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -240,6 +242,20 @@ class UserMembershipModel(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class DailyCheckinModel(Base):
+    __tablename__ = "daily_checkins"
+    __table_args__ = (
+        UniqueConstraint("user_id", "checkin_date", name="uq_daily_checkin_user_date"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    checkin_date = Column(Date, nullable=False)
+    reward_image_quota = Column(Integer, nullable=False, default=0)
+    streak_days = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class ImageUsageEventModel(Base):
     __tablename__ = "image_usage_events"
 
@@ -311,6 +327,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "verify_code_ttl_seconds": 900,
     "verify_send_cooldown_seconds": 60,
     "verify_max_attempts": 5,
+    "checkin_enabled": True,
+    "checkin_daily_image_quota": 1,
+    "checkin_streak_bonus_enabled": True,
+    "checkin_streak_bonus_days": 7,
+    "checkin_streak_bonus_image_quota": 3,
+    "checkin_timezone": "Asia/Shanghai",
     "smtp_host": "",
     "smtp_port": 587,
     "smtp_username": "",
@@ -645,19 +667,31 @@ class UserService:
                     "verify_code_ttl_seconds",
                     "verify_send_cooldown_seconds",
                     "verify_max_attempts",
+                    "checkin_daily_image_quota",
+                    "checkin_streak_bonus_days",
+                    "checkin_streak_bonus_image_quota",
                     "smtp_port",
                 }:
                     value = max(0, int(value or 0))
-                    if key in {"default_image_concurrency", "verify_max_attempts"}:
+                    if key in {"default_image_concurrency", "verify_max_attempts", "checkin_streak_bonus_days"}:
                         value = max(1, value)
                 if key in {
                     "registration_enabled",
                     "email_verification_enabled",
                     "invitation_required",
                     "promo_codes_enabled",
+                    "checkin_enabled",
+                    "checkin_streak_bonus_enabled",
                     "smtp_tls",
                 }:
                     value = bool(value)
+                if key == "checkin_timezone":
+                    timezone_name = clean_string(value) or str(DEFAULT_SETTINGS["checkin_timezone"])
+                    try:
+                        ZoneInfo(timezone_name)
+                    except (ZoneInfoNotFoundError, ValueError):
+                        timezone_name = str(DEFAULT_SETTINGS["checkin_timezone"])
+                    value = timezone_name
                 row = session.get(AuthSettingModel, key)
                 if row is None:
                     row = AuthSettingModel(key=key)
@@ -1017,6 +1051,224 @@ class UserService:
             session.commit()
             return self._serialize_user(user, membership)
 
+    @staticmethod
+    def _setting_int(settings: dict[str, object], key: str, default: int, *, minimum: int = 0) -> int:
+        try:
+            value = int(settings.get(key, default) or 0)
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, value)
+
+    @staticmethod
+    def _checkin_timezone_name(settings: dict[str, object]) -> str:
+        timezone_name = clean_string(settings.get("checkin_timezone")) or str(DEFAULT_SETTINGS["checkin_timezone"])
+        try:
+            ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            return str(DEFAULT_SETTINGS["checkin_timezone"])
+        return timezone_name
+
+    @staticmethod
+    def _checkin_timezone(settings: dict[str, object]) -> ZoneInfo:
+        return ZoneInfo(UserService._checkin_timezone_name(settings))
+
+    def _checkin_date(self, settings: dict[str, object], now: datetime | None = None) -> date:
+        current = as_utc(now or utc_now()) or utc_now()
+        return current.astimezone(self._checkin_timezone(settings)).date()
+
+    def _checkin_reward_for_streak(self, settings: dict[str, object], streak_days: int) -> int:
+        reward = self._setting_int(settings, "checkin_daily_image_quota", 1)
+        if bool(settings.get("checkin_streak_bonus_enabled", True)):
+            bonus_days = self._setting_int(settings, "checkin_streak_bonus_days", 7, minimum=1)
+            if streak_days > 0 and streak_days % bonus_days == 0:
+                reward += self._setting_int(settings, "checkin_streak_bonus_image_quota", 3)
+        return reward
+
+    @staticmethod
+    def _date_iso(value: date | None) -> str | None:
+        return value.isoformat() if value is not None else None
+
+    def _latest_checkin(self, session, user_id: str) -> DailyCheckinModel | None:
+        return (
+            session.query(DailyCheckinModel)
+            .filter(DailyCheckinModel.user_id == clean_string(user_id))
+            .order_by(DailyCheckinModel.checkin_date.desc(), DailyCheckinModel.created_at.desc())
+            .first()
+        )
+
+    def _checkin_status_payload(
+        self,
+        *,
+        settings: dict[str, object],
+        today: date,
+        today_row: DailyCheckinModel | None,
+        latest_row: DailyCheckinModel | None,
+    ) -> dict[str, object]:
+        checked_in_today = today_row is not None
+        last_row = today_row or latest_row
+        yesterday = today - timedelta(days=1)
+        if today_row is not None:
+            streak_days = int(today_row.streak_days or 0)
+        elif latest_row is not None and latest_row.checkin_date == yesterday:
+            streak_days = int(latest_row.streak_days or 0)
+        else:
+            streak_days = 0
+        if checked_in_today:
+            reward = int(today_row.reward_image_quota or 0) if today_row is not None else 0
+        else:
+            next_streak = streak_days + 1 if latest_row is not None and latest_row.checkin_date == yesterday else 1
+            reward = self._checkin_reward_for_streak(settings, next_streak)
+        return {
+            "checkin_enabled": bool(settings.get("checkin_enabled", True)),
+            "can_checkin": bool(settings.get("checkin_enabled", True)) and not checked_in_today,
+            "checkin_date": today.isoformat(),
+            "checked_in_today": checked_in_today,
+            "already_checked_in": checked_in_today,
+            "streak_days": streak_days,
+            "last_checkin_date": self._date_iso(last_row.checkin_date if last_row is not None else None),
+            "reward_image_quota": reward,
+            "daily_image_quota": self._setting_int(settings, "checkin_daily_image_quota", 1),
+            "streak_bonus_enabled": bool(settings.get("checkin_streak_bonus_enabled", True)),
+            "streak_bonus_days": self._setting_int(settings, "checkin_streak_bonus_days", 7, minimum=1),
+            "streak_bonus_image_quota": self._setting_int(settings, "checkin_streak_bonus_image_quota", 3),
+            "timezone": self._checkin_timezone_name(settings),
+        }
+
+    def get_checkin_status(self, user_id: str) -> dict[str, object]:
+        normalized_user_id = clean_string(user_id)
+        with self.Session() as session:
+            user = session.get(UserModel, normalized_user_id)
+            if user is None or not bool(user.enabled):
+                raise UserServiceError("user not found", status_code=404, code="not_found")
+            settings = self._settings_from_session(session)
+            today = self._checkin_date(settings)
+            today_row = (
+                session.query(DailyCheckinModel)
+                .filter(
+                    DailyCheckinModel.user_id == normalized_user_id,
+                    DailyCheckinModel.checkin_date == today,
+                )
+                .one_or_none()
+            )
+            latest_row = today_row or self._latest_checkin(session, normalized_user_id)
+            return self._checkin_status_payload(
+                settings=settings,
+                today=today,
+                today_row=today_row,
+                latest_row=latest_row,
+            )
+
+    def _already_checked_in_response(
+        self,
+        session,
+        *,
+        user_id: str,
+        today: date,
+        row: DailyCheckinModel,
+    ) -> dict[str, object]:
+        user = session.get(UserModel, user_id)
+        if user is None or not bool(user.enabled):
+            raise UserServiceError("user not found", status_code=404, code="not_found")
+        membership = self._refresh_user_membership(session, user.id)
+        session.commit()
+        return {
+            "ok": True,
+            "already_checked_in": True,
+            "checkin_date": today.isoformat(),
+            "reward_image_quota": 0,
+            "streak_days": int(row.streak_days or 0),
+            "user": self._serialize_user(user, membership),
+        }
+
+    def checkin(self, user_id: str) -> dict[str, object]:
+        normalized_user_id = clean_string(user_id)
+        now = utc_now()
+        with self._quota_lock, self.Session() as session:
+            settings = self._settings_from_session(session)
+            if not bool(settings.get("checkin_enabled", True)):
+                raise UserServiceError("check-in is disabled", status_code=403, code="checkin_disabled")
+            today = self._checkin_date(settings, now)
+            user = session.get(UserModel, normalized_user_id)
+            if user is None or not bool(user.enabled):
+                raise UserServiceError("user not found", status_code=404, code="not_found")
+            today_row = (
+                session.query(DailyCheckinModel)
+                .filter(
+                    DailyCheckinModel.user_id == normalized_user_id,
+                    DailyCheckinModel.checkin_date == today,
+                )
+                .one_or_none()
+            )
+            if today_row is not None:
+                return self._already_checked_in_response(
+                    session,
+                    user_id=normalized_user_id,
+                    today=today,
+                    row=today_row,
+                )
+            previous = (
+                session.query(DailyCheckinModel)
+                .filter(
+                    DailyCheckinModel.user_id == normalized_user_id,
+                    DailyCheckinModel.checkin_date < today,
+                )
+                .order_by(DailyCheckinModel.checkin_date.desc(), DailyCheckinModel.created_at.desc())
+                .first()
+            )
+            yesterday = today - timedelta(days=1)
+            streak_days = int(previous.streak_days or 0) + 1 if previous is not None and previous.checkin_date == yesterday else 1
+            reward = self._checkin_reward_for_streak(settings, streak_days)
+            row = DailyCheckinModel(
+                id=str(uuid.uuid4()),
+                user_id=normalized_user_id,
+                checkin_date=today,
+                reward_image_quota=reward,
+                streak_days=streak_days,
+                created_at=now,
+            )
+            session.add(row)
+            try:
+                session.flush()
+                if reward:
+                    session.execute(
+                        update(UserModel)
+                        .where(UserModel.id == normalized_user_id, UserModel.enabled.is_(True))
+                        .values(
+                            image_quota=UserModel.image_quota + reward,
+                            updated_at=now,
+                        )
+                    )
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = (
+                    session.query(DailyCheckinModel)
+                    .filter(
+                        DailyCheckinModel.user_id == normalized_user_id,
+                        DailyCheckinModel.checkin_date == today,
+                    )
+                    .one()
+                )
+                return self._already_checked_in_response(
+                    session,
+                    user_id=normalized_user_id,
+                    today=today,
+                    row=existing,
+                )
+            user = session.get(UserModel, normalized_user_id)
+            if user is None:
+                raise UserServiceError("user not found", status_code=404, code="not_found")
+            membership = self._refresh_user_membership(session, user.id, now)
+            session.commit()
+            return {
+                "ok": True,
+                "already_checked_in": False,
+                "checkin_date": today.isoformat(),
+                "reward_image_quota": reward,
+                "streak_days": streak_days,
+                "user": self._serialize_user(user, membership),
+            }
+
     def list_users(self, query: str = "") -> list[dict[str, object]]:
         normalized_query = normalize_email(query)
         with self.Session() as session:
@@ -1244,6 +1496,7 @@ class UserService:
             has_history = (
                 session.query(ImageUsageEventModel).filter(ImageUsageEventModel.user_id == user.id).count()
                 or session.query(UserGalleryImageModel).filter(UserGalleryImageModel.user_id == user.id).count()
+                or session.query(DailyCheckinModel).filter(DailyCheckinModel.user_id == user.id).count()
                 or session.query(RedeemCodeModel).filter(RedeemCodeModel.used_by_user_id == user.id).count()
                 or session.query(PromoCodeUsageModel).filter(PromoCodeUsageModel.user_id == user.id).count()
             )

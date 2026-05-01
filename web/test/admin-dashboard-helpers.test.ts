@@ -22,12 +22,27 @@ import {
 } from "../src/app/settings/components/auth-settings-helpers";
 import type { AuthSettings } from "../src/lib/api";
 
-const baseAuthSettings: AuthSettings = {
+type CheckinAuthSettings = AuthSettings & {
+  checkin_enabled: boolean;
+  checkin_daily_image_quota: number;
+  checkin_streak_bonus_enabled: boolean;
+  checkin_streak_bonus_days: number;
+  checkin_streak_bonus_image_quota: number;
+  checkin_timezone: string;
+};
+
+const baseAuthSettings: CheckinAuthSettings = {
   site_name: "Genapi",
   registration_enabled: true,
   email_verification_enabled: false,
   invitation_required: false,
   promo_codes_enabled: true,
+  checkin_enabled: false,
+  checkin_daily_image_quota: 0,
+  checkin_streak_bonus_enabled: false,
+  checkin_streak_bonus_days: 7,
+  checkin_streak_bonus_image_quota: 0,
+  checkin_timezone: "Asia/Shanghai",
   email_domain_whitelist: [],
   default_image_quota: 0,
   default_image_concurrency: 1,
@@ -206,6 +221,12 @@ describe("admin dashboard helpers", () => {
       email_verification_enabled: "0",
       invitation_required: 0,
       promo_codes_enabled: "true",
+      checkin_enabled: "1",
+      checkin_daily_image_quota: "-8",
+      checkin_streak_bonus_enabled: "true",
+      checkin_streak_bonus_days: "0",
+      checkin_streak_bonus_image_quota: "12",
+      checkin_timezone: "",
       email_domain_whitelist: "Example.com, TEST.dev\n",
       default_image_quota: "12",
       default_image_concurrency: "3",
@@ -215,12 +236,18 @@ describe("admin dashboard helpers", () => {
       smtp_port: "465",
       smtp_password: "server-secret",
       smtp_tls: "false",
-    } as unknown as AuthSettings);
+    } as unknown as CheckinAuthSettings) as CheckinAuthSettings;
 
     expect(settings.registration_enabled).toBe(false);
     expect(settings.email_verification_enabled).toBe(false);
     expect(settings.invitation_required).toBe(false);
     expect(settings.promo_codes_enabled).toBe(true);
+    expect(settings.checkin_enabled).toBe(true);
+    expect(settings.checkin_daily_image_quota).toBe(0);
+    expect(settings.checkin_streak_bonus_enabled).toBe(true);
+    expect(settings.checkin_streak_bonus_days).toBe(1);
+    expect(settings.checkin_streak_bonus_image_quota).toBe(12);
+    expect(settings.checkin_timezone).toBe("Asia/Shanghai");
     expect(settings.email_domain_whitelist).toEqual(["example.com", "test.dev"]);
     expect(settings.default_image_quota).toBe(12);
     expect(settings.default_image_concurrency).toBe(3);
@@ -240,13 +267,25 @@ describe("admin dashboard helpers", () => {
       smtp_port: 465,
       default_image_concurrency: 0,
       verify_max_attempts: 0,
-    });
+      checkin_enabled: true,
+      checkin_daily_image_quota: -2,
+      checkin_streak_bonus_enabled: true,
+      checkin_streak_bonus_days: 0,
+      checkin_streak_bonus_image_quota: -5,
+      checkin_timezone: "",
+    }) as Partial<CheckinAuthSettings>;
 
     expect(emptyPasswordPayload).not.toHaveProperty("smtp_password");
     expect(emptyPasswordPayload.smtp_tls).toBe(false);
     expect(emptyPasswordPayload.smtp_port).toBe(465);
     expect(emptyPasswordPayload.default_image_concurrency).toBe(1);
     expect(emptyPasswordPayload.verify_max_attempts).toBe(5);
+    expect(emptyPasswordPayload.checkin_enabled).toBe(true);
+    expect(emptyPasswordPayload.checkin_daily_image_quota).toBe(0);
+    expect(emptyPasswordPayload.checkin_streak_bonus_enabled).toBe(true);
+    expect(emptyPasswordPayload.checkin_streak_bonus_days).toBe(1);
+    expect(emptyPasswordPayload.checkin_streak_bonus_image_quota).toBe(0);
+    expect(emptyPasswordPayload.checkin_timezone).toBe("Asia/Shanghai");
 
     const newPasswordPayload = buildAuthSettingsPayload({
       ...baseAuthSettings,
