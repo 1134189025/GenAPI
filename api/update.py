@@ -165,8 +165,7 @@ def _validate_update_status(status: dict[str, Any]) -> None:
 
 def _create_executor(settings: object) -> object:
     deployment_mode = str(getattr(settings, "deployment_mode", "") or "")
-    build_type = str(getattr(settings, "build_type", "") or "")
-    if deployment_mode == "docker" and build_type == "docker":
+    if deployment_mode == "docker":
         if DockerComposeUpdateExecutor is None:
             raise HTTPException(status_code=400, detail={"error": "Docker updater is not available"})
         return DockerComposeUpdateExecutor(DATA_DIR, settings)
@@ -197,11 +196,10 @@ def _status_with_preflight(settings: object, status: dict[str, Any]) -> tuple[di
     next_status = dict(status)
     next_status["preflight"] = preflight
     deployment_mode = str(getattr(settings, "deployment_mode", "") or "")
-    build_type = str(getattr(settings, "build_type", "") or "")
-    if deployment_mode == "docker" and build_type == "docker":
+    if deployment_mode == "docker":
         next_status["can_update"] = bool(next_status.get("update_available")) and bool(preflight.get("ok"))
     if next_status.get("update_available") and not preflight.get("ok") and (
-        next_status.get("can_update") or (deployment_mode == "docker" and build_type == "docker")
+        next_status.get("can_update") or deployment_mode == "docker"
     ):
         next_status["can_update"] = False
         errors = [str(error) for error in preflight.get("errors", []) if str(error).strip()]

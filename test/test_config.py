@@ -144,6 +144,13 @@ class ConfigLoadingTests(unittest.TestCase):
 
         self.assertNotIn("COPY config.json", dockerfile)
 
+    def test_dockerfile_defaults_to_docker_update_mode(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        dockerfile = (root_dir / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("GENAPI_DEPLOYMENT_MODE=docker", dockerfile)
+        self.assertIn("GENAPI_BUILD_TYPE=docker", dockerfile)
+
     def test_docker_build_context_excludes_runtime_secrets(self) -> None:
         root_dir = Path(__file__).resolve().parents[1]
         dockerignore = (root_dir / ".dockerignore").read_text(encoding="utf-8").splitlines()

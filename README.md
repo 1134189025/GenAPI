@@ -331,6 +331,7 @@ tar -czf genapi-data-backup-$(date +%Y%m%d-%H%M%S).tar.gz data
 拉取并重启应用服务：
 
 ```bash
+git pull  # 或手动同步最新 docker-compose.yml
 docker compose pull app
 docker compose up -d app
 docker compose ps app

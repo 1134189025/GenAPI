@@ -15,7 +15,7 @@ import {
   type UpdateStatus,
 } from "@/lib/api";
 
-const DOCKER_MANUAL_UPDATE_COMMAND = "docker compose pull app && docker compose up -d app";
+const DOCKER_MANUAL_UPDATE_COMMAND = "git pull && docker compose pull app && docker compose up -d app";
 const SOURCE_MANUAL_UPDATE_COMMAND = "git pull && restart service manually";
 const SYSTEMD_UPDATE_CONFIRMATION = "系统更新会下载并安装最新发布包，完成后可能需要重启服务。确认立即更新？";
 const DOCKER_UPDATE_CONFIRMATION = "容器更新会拉取最新镜像并重新创建容器，页面可能会短暂断开连接。确认立即更新？";
@@ -101,7 +101,7 @@ export function getManualUpdateGuidance(status: UpdateStatus | undefined): Manua
     if (!isDockerWebUpdateMode(status)) {
       return {
         title: "容器部署需要手动更新",
-        description: "当前部署模式不通过网页执行器更新，请在部署目录运行以下命令。",
+        description: "当前部署缺少网页更新所需的 Docker 授权或 compose 配置。请先同步最新 docker-compose.yml，再在部署目录运行以下命令。",
         command: DOCKER_MANUAL_UPDATE_COMMAND,
       };
     }
@@ -113,6 +113,27 @@ export function getManualUpdateGuidance(status: UpdateStatus | undefined): Manua
     description: "当前构建不包含发布包更新器，请拉取代码后手动重启服务。",
     command: SOURCE_MANUAL_UPDATE_COMMAND,
   };
+}
+
+export function getUpdateActionHint(
+  status: UpdateStatus | undefined,
+  options: { busy?: boolean; needsRestart?: boolean } = {},
+) {
+  if (!status) return "";
+  const busy = options.busy ?? false;
+  const needsRestart = options.needsRestart ?? false;
+  const manualGuidance = getManualUpdateGuidance(status);
+  const { webUpdateMode } = getUpdateActionAvailability(status, { busy, needsRestart });
+  const hasUpdate = hasAvailableSystemUpdate(status);
+
+  if (status.error) return status.error;
+  if (!webUpdateMode && manualGuidance) return manualGuidance.description;
+  if (status.disabled_reason) return status.disabled_reason;
+  if (status.can_update === false) return "当前部署暂不支持网页更新。";
+  if (needsRestart) return "更新已安装，重启服务前不会再次执行更新。";
+  if (!hasUpdate) return "当前已是最新版本，暂无可安装更新。";
+  if (busy) return "更新操作正在执行，请等待当前操作完成。";
+  return "";
 }
 
 export function getReleaseSyncState(status: UpdateStatus | undefined) {
@@ -171,17 +192,10 @@ export function UpdateCard() {
   const releaseNotes = useMemo(() => String(status?.release_info?.body ?? "").trim(), [status?.release_info?.body]);
   const releaseAssets = status?.release_info?.assets ?? [];
 
-  const actionHint = useMemo(() => {
-    if (!status) return "";
-    if (status.error) return status.error;
-    if (status.disabled_reason) return status.disabled_reason;
-    if (!webUpdateMode) return manualGuidance?.description ?? "";
-    if (status.can_update === false) return "当前部署暂不支持网页更新。";
-    if (needsRestart) return "更新已安装，重启服务前不会再次执行更新。";
-    if (!hasUpdate) return "当前已是最新版本，暂无可安装更新。";
-    if (busy) return "更新操作正在执行，请等待当前操作完成。";
-    return "";
-  }, [busy, hasUpdate, manualGuidance?.description, needsRestart, status, webUpdateMode]);
+  const actionHint = useMemo(
+    () => getUpdateActionHint(statusValue, { busy, needsRestart }),
+    [busy, needsRestart, statusValue],
+  );
 
   const loadStatus = async (force = false) => {
     if (force) {
@@ -273,7 +287,7 @@ export function UpdateCard() {
   return (
     <DataPanel
       title="版本更新中心"
-      description="面向 Genapi 0.1.10 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
+      description="面向 Genapi 0.1.11 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
       toolbar={
         <>
           <Button

@@ -4,6 +4,7 @@ import {
   confirmSystemUpdateStart,
   getManualUpdateGuidance,
   getReleaseSyncState,
+  getUpdateActionHint,
   getUpdateActionAvailability,
 } from "../src/app/settings/components/update-card";
 import { isSub2APIAuthModeChanged, validateSub2APIServerForm } from "../src/app/settings/components/sub2api-connections";
@@ -86,7 +87,8 @@ describe("settings UI helper contracts", () => {
       latest_version: "0.1.6",
     };
 
-    expect(getManualUpdateGuidance(dockerStatus)?.command).toBe("docker compose pull app && docker compose up -d app");
+    expect(getManualUpdateGuidance(dockerStatus)?.description).toContain("同步最新 docker-compose.yml");
+    expect(getManualUpdateGuidance(dockerStatus)?.command).toBe("git pull && docker compose pull app && docker compose up -d app");
     expect(getManualUpdateGuidance(sourceStatus)?.command).toBe("git pull && restart service manually");
     expect(getManualUpdateGuidance(systemdStatus)).toBeNull();
   });
@@ -153,7 +155,22 @@ describe("settings UI helper contracts", () => {
       disabled_reason: "docker socket is unavailable",
     };
 
-    expect(getManualUpdateGuidance(dockerStatus)?.command).toBe("docker compose pull app && docker compose up -d app");
+    expect(getManualUpdateGuidance(dockerStatus)?.command).toBe("git pull && docker compose pull app && docker compose up -d app");
+  });
+
+  test("docker preflight action hint prioritizes compose sync guidance over raw errors", () => {
+    const dockerStatus: UpdateStatus = {
+      deployment_mode: "docker",
+      build_type: "source",
+      can_update: false,
+      has_update: true,
+      current_version: "0.1.10",
+      latest_version: "0.1.11",
+      disabled_reason: "Docker socket is not mounted: /var/run/docker.sock",
+    };
+
+    expect(getUpdateActionHint(dockerStatus)).toContain("同步最新 docker-compose.yml");
+    expect(getUpdateActionHint(dockerStatus)).not.toContain("Docker socket is not mounted");
   });
 
   test("system update start requires explicit confirmation", () => {

@@ -50,7 +50,8 @@ describe("admin operations dashboard pages", () => {
     expect(updateCard).toContain("回滚");
     expect(updateCard).toContain("重启服务");
     expect(updateCard).toContain("Release 说明");
-    expect(updateCard).toContain("docker compose pull app && docker compose up -d app");
+    expect(updateCard).toContain("git pull && docker compose pull app && docker compose up -d app");
+    expect(updateCard).toContain("同步最新 docker-compose.yml");
     expect(updateCard).toContain("git pull && restart service manually");
     expect(updateCard).toContain("容器更新会拉取最新镜像并重新创建容器");
     expect(updateCard).toContain("页面可能会短暂断开连接");

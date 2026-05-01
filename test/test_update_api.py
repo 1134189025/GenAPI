@@ -229,6 +229,63 @@ class UpdateAPITests(unittest.TestCase):
         self.assertTrue(payload["can_update"])
         self.assertTrue(payload["preflight"]["ok"])
 
+    def test_check_updates_reports_docker_preflight_errors_when_build_type_is_missing(self) -> None:
+        update_module = sys.modules["api.update"]
+
+        class FakeDockerExecutor:
+            def __init__(self, data_dir, settings):
+                self.data_dir = data_dir
+                self.settings = settings
+
+            def preflight(self, release_info=None):
+                return {
+                    "ok": False,
+                    "errors": [
+                        "GENAPI_BUILD_TYPE must be docker for Docker compose updates.",
+                        "Docker socket is not mounted: /var/run/docker.sock",
+                    ],
+                    "warnings": [],
+                }
+
+        original_build_status = update_module.build_release_status
+        original_docker_executor = getattr(update_module, "DockerComposeUpdateExecutor", None)
+        old_mode = os.environ.get("GENAPI_DEPLOYMENT_MODE")
+        old_build = os.environ.get("GENAPI_BUILD_TYPE")
+        try:
+            os.environ["GENAPI_DEPLOYMENT_MODE"] = "docker"
+            os.environ["GENAPI_BUILD_TYPE"] = "source"
+            update_module.build_release_status = lambda **kwargs: {
+                "enabled": True,
+                "can_update": False,
+                "mode": "docker",
+                "deployment_mode": "docker",
+                "build_type": "source",
+                "current_version": "0.1.9",
+                "latest_version": "0.1.10",
+                "latest_tag": "v0.1.10",
+                "release_url": "https://github.com/owner/project/releases/tag/v0.1.10",
+                "release_info": {"assets": []},
+                "update_available": True,
+            }
+            update_module.DockerComposeUpdateExecutor = FakeDockerExecutor
+            response = self.client.get("/api/admin/system/check-updates", headers=self.headers)
+        finally:
+            update_module.build_release_status = original_build_status
+            if original_docker_executor is None:
+                delattr(update_module, "DockerComposeUpdateExecutor")
+            else:
+                update_module.DockerComposeUpdateExecutor = original_docker_executor
+            self._restore_env("GENAPI_DEPLOYMENT_MODE", old_mode)
+            self._restore_env("GENAPI_BUILD_TYPE", old_build)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertFalse(payload["can_update"])
+        self.assertIn("GENAPI_BUILD_TYPE must be docker", payload["disabled_reason"])
+        self.assertIn("Docker socket is not mounted", payload["disabled_reason"])
+        self.assertIn("GENAPI_BUILD_TYPE must be docker", payload["preflight"]["errors"][0])
+        self.assertFalse(any("systemd-binary" in error for error in payload["preflight"]["errors"]))
+
     def test_system_update_creates_job_invokes_executor_and_legacy_start_wraps_job(self) -> None:
         update_module = sys.modules["api.update"]
         performed: list[dict[str, object]] = []
