@@ -237,7 +237,7 @@ export default function AdminPromoCodesPage() {
       <PageHeader
         eyebrow="Promo Codes"
         title="优惠码管理"
-        description="创建和维护注册优惠码。后端列表只返回 code_preview，因此创建后不会在界面中伪造或恢复完整码。"
+        description="创建和维护注册优惠码，用于向新用户赠送 GGB。后端列表只返回 code_preview，因此创建后不会在界面中伪造或恢复完整码。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading} onClick={() => void load()}>
@@ -256,7 +256,7 @@ export default function AdminPromoCodesPage() {
         <StatCard label="优惠码总数" value={summary.total} icon={<Percent className="size-5" />} tone="slate" />
         <StatCard label="可用" value={summary.active} icon={<Gift className="size-5" />} tone="emerald" />
         <StatCard label="累计使用" value={summary.uses} icon={<Percent className="size-5" />} tone="blue" />
-        <StatCard label="总赠送额度" value={summary.quota} icon={<Plus className="size-5" />} tone="teal" />
+        <StatCard label="总赠送 GGB" value={`${summary.quota} GGB`} icon={<Plus className="size-5" />} tone="teal" />
       </div>
 
       <DataPanel
@@ -303,7 +303,7 @@ export default function AdminPromoCodesPage() {
           <div className="p-5">
             <EmptyState
               title="暂无优惠码"
-              description="创建优惠码后，新用户注册可获得图片额度。"
+              description="创建优惠码后，新用户注册可获得 GGB。"
               icon={<Percent className="size-7" />}
               action={
                 <Button className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setIsCreateOpen(true)}>
@@ -319,7 +319,7 @@ export default function AdminPromoCodesPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>预览码</TableHead>
-                  <TableHead>赠送额度</TableHead>
+                  <TableHead>赠送 GGB</TableHead>
                   <TableHead>使用次数</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>创建时间</TableHead>
@@ -336,7 +336,7 @@ export default function AdminPromoCodesPage() {
                       <TableCell>
                         <span className="font-mono text-sm font-semibold text-slate-900">{item.code_preview}</span>
                       </TableCell>
-                      <TableCell className="font-medium text-slate-700">+{item.image_quota}</TableCell>
+                      <TableCell className="font-medium text-slate-700">+{item.image_quota} GGB</TableCell>
                       <TableCell className="text-slate-600">{formatUsageLimit(item)}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5">
@@ -481,7 +481,7 @@ function PromoCodeDialog({
           </Field>
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>赠送图片额度</FieldLabel>
+              <FieldLabel>赠送 GGB</FieldLabel>
               <Input
                 value={form.image_quota}
                 type="number"

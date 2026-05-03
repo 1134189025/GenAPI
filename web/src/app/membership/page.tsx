@@ -22,6 +22,7 @@ import {
   type MembershipPlan,
   type UserMembership,
 } from "@/lib/api";
+import { formatQuotaAsGgb } from "@/lib/ggb";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 function formatDate(value: string | null | undefined) {
@@ -166,7 +167,7 @@ export default function MembershipPage() {
         "reward_image_quota",
         "daily_image_quota",
       ]);
-      toast.success(reward > 0 ? `签到成功，已领取 ${reward} 张图片额度` : "签到成功");
+      toast.success(reward > 0 ? `签到成功，已领取 ${formatQuotaAsGgb(reward)}` : "签到成功");
       await Promise.all([loadMembershipData(), loadCheckinStatus()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "签到失败");
@@ -211,7 +212,7 @@ export default function MembershipPage() {
       <PageHeader
         eyebrow="Membership"
         title="会员中心"
-        description="查看当前会员状态、周期额度、到期时间和可兑换的会员套餐。会员兑换码请到兑换中心输入。"
+        description="查看当前会员状态、周期 GGB、到期时间和可兑换的会员套餐。会员兑换码请到兑换中心输入。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading || isCheckinLoading} onClick={() => void load()}>
@@ -230,12 +231,12 @@ export default function MembershipPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="当前会员" value={isLoading ? "加载中..." : membershipStatus} icon={<Crown className="size-5" />} tone={activeMembership ? "amber" : "slate"} />
-        <StatCard label="会员额度" value={user?.member_image_quota ?? 0} hint="当前周期剩余额度" icon={<Sparkles className="size-5" />} tone="teal" />
-        <StatCard label="总图片额度" value={user?.total_image_quota ?? user?.image_quota ?? 0} hint="普通额度 + 会员额度" icon={<Sparkles className="size-5" />} tone="blue" />
+        <StatCard label="会员 GGB" value={formatQuotaAsGgb(user?.member_image_quota ?? 0)} hint="当前周期剩余 GGB" icon={<Sparkles className="size-5" />} tone="teal" />
+        <StatCard label="总 GGB 余额" value={formatQuotaAsGgb(user?.total_image_quota ?? user?.image_quota ?? 0)} hint="普通 GGB + 会员 GGB" icon={<Sparkles className="size-5" />} tone="blue" />
         <StatCard label="周期结束" value={formatDate(user?.membership_period_ends_at)} icon={<CalendarClock className="size-5" />} tone="emerald" />
       </div>
 
-      <DataPanel title="每日签到" description="每日签到领取普通图片额度，连续签到可获得额外奖励。">
+      <DataPanel title="每日签到" description="每日签到领取普通 GGB 余额，连续签到可获得额外奖励。">
         {isCheckinLoading ? (
           <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-slate-500">
             <LoaderCircle className="size-5 animate-spin" />
@@ -259,7 +260,7 @@ export default function MembershipPage() {
           <div className="p-5">
             <EmptyState
               title="签到奖励暂未开启"
-              description="管理员开启后，用户可在这里领取每日图片额度。"
+              description="管理员开启后，用户可在这里领取每日 GGB。"
               icon={<Gift className="size-7" />}
             />
           </div>
@@ -269,7 +270,7 @@ export default function MembershipPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-emerald-700">今日奖励</div>
-                  <div className="mt-2 text-3xl font-black text-slate-950">{todayReward} 张</div>
+                  <div className="mt-2 text-3xl font-black text-slate-950">{formatQuotaAsGgb(todayReward)}</div>
                 </div>
                 {checkedInToday ? (
                   <Badge variant="success" className="rounded-md">今日已领取</Badge>
@@ -281,7 +282,7 @@ export default function MembershipPage() {
                 )}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-600">
-                奖励会发放到普通图片额度，可用于生成或编辑图片。
+                奖励会发放到普通 GGB 余额，可用于生成或编辑图片。
               </p>
             </div>
             <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-3 lg:grid-cols-1">
@@ -297,7 +298,7 @@ export default function MembershipPage() {
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="text-xs font-semibold text-slate-500">连续奖励</div>
                 <div className="mt-2 text-sm font-bold text-slate-950">
-                  {streakBonusEnabled && streakBonusDays > 0 ? `${streakBonusDays} 天额外 +${streakBonusQuota} 张` : "未启用"}
+                  {streakBonusEnabled && streakBonusDays > 0 ? `${streakBonusDays} 天额外 +${formatQuotaAsGgb(streakBonusQuota)}` : "未启用"}
                 </div>
               </div>
             </div>
@@ -305,7 +306,7 @@ export default function MembershipPage() {
         )}
       </DataPanel>
 
-      <DataPanel title="当前会员" description="会员额度按套餐周期刷新，不会结转到下一个周期。">
+      <DataPanel title="当前会员" description="会员 GGB 按套餐周期刷新，不会结转到下一个周期。">
         {isLoading ? (
           <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-slate-500">
             <LoaderCircle className="size-5 animate-spin" />
@@ -319,7 +320,7 @@ export default function MembershipPage() {
                 <span className="min-w-0 break-words text-sm font-bold text-slate-900">{activeMembership.plan_name}</span>
               </div>
               <div className="mt-4 text-sm leading-6 text-slate-600">
-                每 {activeMembership.period_days} 天刷新 {activeMembership.period_image_quota} 张会员图片额度，有效期 {activeMembership.duration_days} 天。
+                每 {activeMembership.period_days} 天刷新 {formatQuotaAsGgb(activeMembership.period_image_quota)} 会员 GGB，有效期 {activeMembership.duration_days} 天。
               </div>
             </div>
             <div className="break-words rounded-3xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-600">
@@ -332,7 +333,7 @@ export default function MembershipPage() {
           <div className="p-5">
             <EmptyState
               title="暂无有效会员"
-              description="获取会员兑换码后，可在兑换中心激活套餐并领取周期会员图片额度。"
+              description="获取会员兑换码后，可在兑换中心激活套餐并领取周期会员 GGB。"
               icon={<Crown className="size-7" />}
               action={
                 <Button asChild className="rounded-xl bg-slate-950 text-white hover:bg-slate-800">
@@ -365,8 +366,8 @@ export default function MembershipPage() {
                   周期天数
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 sm:block sm:text-center">
-                  <div className="break-words text-lg font-black text-slate-950">{plan.period_image_quota}</div>
-                  周期额度
+                  <div className="break-words text-lg font-black text-slate-950">{formatQuotaAsGgb(plan.period_image_quota)}</div>
+                  周期 GGB
                 </div>
               </div>
             </div>

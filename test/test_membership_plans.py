@@ -10,6 +10,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+GGB_PER_IMAGE = 5
+
 
 class MembershipPlanTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -75,6 +77,15 @@ class MembershipPlanTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200, login.text)
         return str(created.json()["item"]["id"]), self.auth_headers(str(login.json()["token"]))
 
+    def assert_user_ggb(self, user: dict[str, object], *, regular: int, member: int = 0) -> None:
+        self.assertIn("ggb", user)
+        self.assertEqual(user["ggb"], regular)
+        self.assertEqual(user["image_quota"], regular)
+        self.assertIn("member_ggb", user)
+        self.assertEqual(user["member_ggb"], member)
+        self.assertEqual(user["member_image_quota"], member)
+        self.assertEqual(user["total_image_quota"], regular + member)
+
     def test_admin_creates_plan_and_user_redeems_membership_code(self) -> None:
         admin_token = self.create_admin()
         admin_headers = self.auth_headers(admin_token)
@@ -119,10 +130,50 @@ class MembershipPlanTests(unittest.TestCase):
         self.assertEqual(user["membership"]["plan_name"], "测试周卡")
         self.assertEqual(user["membership"]["status"], "active")
 
+    def test_membership_plan_awards_member_ggb_and_keeps_legacy_fields_consistent(self) -> None:
+        admin_token = self.create_admin()
+        admin_headers = self.auth_headers(admin_token)
+        _, user_headers = self.create_user(admin_token, image_quota=3)
+        created_plan = self.client.post(
+            "/api/admin/membership-plans",
+            headers=admin_headers,
+            json={
+                "name": "GGB 周卡",
+                "description": "每 7 天发放 25 GGB",
+                "duration_days": 7,
+                "period_days": 7,
+                "period_image_quota": 25,
+                "enabled": True,
+                "sort_order": 6,
+            },
+        )
+        self.assertEqual(created_plan.status_code, 200, created_plan.text)
+        plan = created_plan.json()["item"]
+        generated = self.client.post(
+            "/api/admin/redeem-codes/generate",
+            headers=admin_headers,
+            json={"type": "membership", "membership_plan_id": plan["id"], "count": 1},
+        )
+        self.assertEqual(generated.status_code, 200, generated.text)
+        code = generated.json()["codes"][0]["code"]
+
+        redeemed = self.client.post("/api/redeem", headers=user_headers, json={"code": code})
+
+        self.assertEqual(redeemed.status_code, 200, redeemed.text)
+        user = redeemed.json()["user"]
+        self.assert_user_ggb(user, regular=3, member=25)
+        membership = user["membership"]
+        self.assertIn("member_ggb", membership)
+        self.assertEqual(membership["member_ggb"], 25)
+        self.assertEqual(membership["member_image_quota"], 25)
+        self.assertIn("period_ggb", membership)
+        self.assertEqual(membership["period_ggb"], 25)
+        self.assertEqual(membership["period_image_quota"], 25)
+
     def test_member_quota_is_reserved_first_and_refunded_by_source(self) -> None:
         admin_token = self.create_admin()
         admin_headers = self.auth_headers(admin_token)
-        user_id, _ = self.create_user(admin_token, image_quota=2)
+        user_id, _ = self.create_user(admin_token, image_quota=GGB_PER_IMAGE)
         plan = self.client.get("/api/admin/membership-plans", headers=admin_headers).json()["items"][0]
         code = self.client.post(
             "/api/admin/redeem-codes/generate",
@@ -132,8 +183,8 @@ class MembershipPlanTests(unittest.TestCase):
         self.user_service.redeem(user_id, code)
         with self.user_service.Session() as session:
             membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
-            membership.member_image_quota = 1
-            membership.period_image_quota = 1
+            membership.member_image_quota = GGB_PER_IMAGE
+            membership.period_image_quota = GGB_PER_IMAGE
             session.commit()
 
         reservation = self.user_service.reserve_image_quota(
@@ -144,21 +195,21 @@ class MembershipPlanTests(unittest.TestCase):
 
         after_reserve = self.user_service.get_user(user_id)
         self.assertEqual(after_reserve["member_image_quota"], 0)
-        self.assertEqual(after_reserve["image_quota"], 1)
+        self.assertEqual(after_reserve["image_quota"], 0)
         self.assertEqual(reservation.member_reserved_count, 1)
         self.assertEqual(reservation.regular_reserved_count, 1)
 
         self.user_service.settle_image_quota(reservation, success=False, error="upstream failed")
 
         after_refund = self.user_service.get_user(user_id)
-        self.assertEqual(after_refund["member_image_quota"], 1)
-        self.assertEqual(after_refund["image_quota"], 2)
+        self.assertEqual(after_refund["member_image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(after_refund["image_quota"], GGB_PER_IMAGE)
         self.assertEqual(after_refund["active_image_requests"], 0)
 
     def test_old_member_quota_refund_does_not_credit_replacement_membership(self) -> None:
         admin_token = self.create_admin()
         admin_headers = self.auth_headers(admin_token)
-        user_id, _ = self.create_user(admin_token, image_quota=2)
+        user_id, _ = self.create_user(admin_token, image_quota=2 * GGB_PER_IMAGE)
         first_plan = self.client.get("/api/admin/membership-plans", headers=admin_headers).json()["items"][0]
         replacement_plan = self.client.post(
             "/api/admin/membership-plans",
@@ -186,8 +237,8 @@ class MembershipPlanTests(unittest.TestCase):
         self.user_service.redeem(user_id, first_code)
         with self.user_service.Session() as session:
             membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
-            membership.member_image_quota = 1
-            membership.period_image_quota = 1
+            membership.member_image_quota = GGB_PER_IMAGE
+            membership.period_image_quota = GGB_PER_IMAGE
             session.commit()
 
         reservation = self.user_service.reserve_image_quota(
@@ -204,7 +255,7 @@ class MembershipPlanTests(unittest.TestCase):
         after_refund = self.user_service.get_user(user_id)
         self.assertEqual(after_refund["membership"]["plan_name"], "替换月卡")
         self.assertEqual(after_refund["member_image_quota"], 9)
-        self.assertEqual(after_refund["image_quota"], 2)
+        self.assertEqual(after_refund["image_quota"], 2 * GGB_PER_IMAGE)
         self.assertEqual(after_refund["active_image_requests"], 0)
 
     def test_deleting_used_membership_code_clears_membership_source_reference(self) -> None:
@@ -229,7 +280,7 @@ class MembershipPlanTests(unittest.TestCase):
     def test_old_member_quota_refund_does_not_credit_replacement_after_source_code_deleted(self) -> None:
         admin_token = self.create_admin()
         admin_headers = self.auth_headers(admin_token)
-        user_id, _ = self.create_user(admin_token, image_quota=2)
+        user_id, _ = self.create_user(admin_token, image_quota=2 * GGB_PER_IMAGE)
         first_plan = self.client.get("/api/admin/membership-plans", headers=admin_headers).json()["items"][0]
         replacement_plan = self.client.post(
             "/api/admin/membership-plans",
@@ -259,8 +310,8 @@ class MembershipPlanTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         with self.user_service.Session() as session:
             membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
-            membership.member_image_quota = 1
-            membership.period_image_quota = 1
+            membership.member_image_quota = GGB_PER_IMAGE
+            membership.period_image_quota = GGB_PER_IMAGE
             self.assertIsNone(membership.source_redeem_code_id)
             session.commit()
 
@@ -278,8 +329,102 @@ class MembershipPlanTests(unittest.TestCase):
         after_refund = self.user_service.get_user(user_id)
         self.assertEqual(after_refund["membership"]["plan_name"], "无来源替换卡")
         self.assertEqual(after_refund["member_image_quota"], 6)
-        self.assertEqual(after_refund["image_quota"], 2)
+        self.assertEqual(after_refund["image_quota"], 2 * GGB_PER_IMAGE)
         self.assertEqual(after_refund["active_image_requests"], 0)
+
+    def test_old_period_member_refund_does_not_credit_refreshed_period(self) -> None:
+        admin_token = self.create_admin()
+        admin_headers = self.auth_headers(admin_token)
+        user_id, _ = self.create_user(admin_token, image_quota=GGB_PER_IMAGE)
+        plan = self.client.get("/api/admin/membership-plans", headers=admin_headers).json()["items"][0]
+        code = self.client.post(
+            "/api/admin/redeem-codes/generate",
+            headers=admin_headers,
+            json={"type": "membership", "membership_plan_id": plan["id"], "count": 1},
+        ).json()["codes"][0]["code"]
+        self.user_service.redeem(user_id, code)
+
+        now = self.user_service_module.utc_now()
+        old_period_start = now - timedelta(days=2)
+        old_period_end = now + timedelta(hours=1)
+        with self.user_service.Session() as session:
+            membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
+            membership.member_image_quota = GGB_PER_IMAGE
+            membership.period_image_quota = GGB_PER_IMAGE
+            membership.current_period_started_at = old_period_start
+            membership.current_period_ends_at = old_period_end
+            membership.expires_at = now + timedelta(days=3)
+            session.commit()
+
+        reservation = self.user_service.reserve_image_quota(
+            self.user_service.get_user(user_id),
+            1,
+            "/api/image/generations",
+        )
+        self.assertEqual(self.user_service.get_user(user_id)["member_image_quota"], 0)
+
+        with self.user_service.Session() as session:
+            membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
+            membership.current_period_started_at = old_period_start
+            membership.current_period_ends_at = now - timedelta(seconds=1)
+            session.commit()
+        refreshed_period = self.user_service.get_user(user_id)
+        self.assertEqual(refreshed_period["member_image_quota"], GGB_PER_IMAGE)
+
+        self.user_service.settle_image_quota(reservation, success=False, error="upstream failed")
+
+        after_refund = self.user_service.get_user(user_id)
+        self.assertEqual(after_refund["member_image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(after_refund["image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(after_refund["active_image_requests"], 0)
+
+    def test_stale_old_period_member_refund_does_not_credit_refreshed_period(self) -> None:
+        admin_token = self.create_admin()
+        admin_headers = self.auth_headers(admin_token)
+        user_id, _ = self.create_user(admin_token, image_quota=GGB_PER_IMAGE)
+        plan = self.client.get("/api/admin/membership-plans", headers=admin_headers).json()["items"][0]
+        code = self.client.post(
+            "/api/admin/redeem-codes/generate",
+            headers=admin_headers,
+            json={"type": "membership", "membership_plan_id": plan["id"], "count": 1},
+        ).json()["codes"][0]["code"]
+        self.user_service.redeem(user_id, code)
+
+        now = self.user_service_module.utc_now()
+        old_period_start = now - timedelta(days=2)
+        old_period_end = now + timedelta(hours=1)
+        with self.user_service.Session() as session:
+            membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
+            membership.member_image_quota = GGB_PER_IMAGE
+            membership.period_image_quota = GGB_PER_IMAGE
+            membership.current_period_started_at = old_period_start
+            membership.current_period_ends_at = old_period_end
+            membership.expires_at = now + timedelta(days=3)
+            session.commit()
+
+        reservation = self.user_service.reserve_image_quota(
+            self.user_service.get_user(user_id),
+            1,
+            "/api/image/generations",
+        )
+        with self.user_service.Session() as session:
+            event = session.get(self.user_service_module.ImageUsageEventModel, reservation.event_id)
+            self.assertIsNotNone(event)
+            event.created_at = old_period_start + timedelta(hours=1)
+            membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
+            membership.current_period_started_at = old_period_start
+            membership.current_period_ends_at = now - timedelta(seconds=1)
+            session.commit()
+        refreshed_period = self.user_service.get_user(user_id)
+        self.assertEqual(refreshed_period["member_image_quota"], GGB_PER_IMAGE)
+
+        recovered = self.user_service.recover_stale_image_quota_reservations(stale_after_seconds=0)
+
+        after_recovery = self.user_service.get_user(user_id)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(after_recovery["member_image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(after_recovery["image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(after_recovery["active_image_requests"], 0)
 
     def test_membership_period_resets_without_rollover_and_expiry_clears_member_quota(self) -> None:
         admin_token = self.create_admin()

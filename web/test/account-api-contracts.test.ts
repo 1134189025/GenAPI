@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 const httpRequest = mock(async () => ({}));
+const httpBlobRequest = mock(async () => new Blob());
 
-mock.module("../src/lib/request", () => ({ httpRequest }));
-mock.module("@/lib/request", () => ({ httpRequest }));
+mock.module("../src/lib/request", () => ({ httpBlobRequest, httpRequest }));
+mock.module("@/lib/request", () => ({ httpBlobRequest, httpRequest }));
 
 const api = await import("../src/lib/api");
+const accountPage = await import("../src/app/accounts/page");
 
 beforeEach(() => {
+  httpBlobRequest.mockClear();
   httpRequest.mockClear();
 });
 
@@ -47,6 +50,57 @@ describe("account management API contracts", () => {
     expect(httpRequest).toHaveBeenNthCalledWith(2, "/api/accounts/refresh", {
       method: "POST",
       body: { account_ids: ["id-a", "id-b"], token_refs: ["token:aaaa"] },
+    });
+  });
+
+  test("refresh account API sends the full active filter result payload", async () => {
+    const refs = accountPage.getAccountRefreshRefsForFilter(
+      [
+        {
+          id: "problem-a",
+          token_ref: "token:a",
+          type: "Free",
+          status: "限流",
+          quota: 10,
+          imageQuotaUnknown: false,
+          email: "a@example.test",
+          success: 0,
+          fail: 0,
+          lastUsedAt: null,
+        },
+        {
+          id: "problem-b",
+          token_ref: "token:b",
+          type: "Free",
+          status: "正常",
+          quota: 0,
+          imageQuotaUnknown: false,
+          email: "b@example.test",
+          success: 0,
+          fail: 0,
+          lastUsedAt: null,
+        },
+        {
+          id: "disabled",
+          token_ref: "token:disabled",
+          type: "Free",
+          status: "禁用",
+          quota: 0,
+          imageQuotaUnknown: false,
+          email: "disabled@example.test",
+          success: 0,
+          fail: 0,
+          lastUsedAt: null,
+        },
+      ],
+      { statusFilter: "problem" },
+    );
+
+    await api.refreshAccounts(refs);
+
+    expect(httpRequest).toHaveBeenCalledWith("/api/accounts/refresh", {
+      method: "POST",
+      body: { account_ids: ["problem-a", "problem-b"], token_refs: ["token:a", "token:b"] },
     });
   });
 

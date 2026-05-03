@@ -22,7 +22,7 @@ class AccountTokenPrivacyTests(unittest.TestCase):
             service.add_accounts([token])
 
             listed = service.list_accounts()
-            with patch("services.account_service.log_service.add") as log_mock:
+            with patch.object(AccountService.export_accounts.__globals__["log_service"], "add") as log_mock:
                 exported = service.export_accounts()
 
             self.assertEqual(len(listed), 1)
@@ -38,7 +38,7 @@ class AccountTokenPrivacyTests(unittest.TestCase):
             service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
             service.add_accounts([token])
 
-            with patch("services.account_service.log_service.add") as log_mock:
+            with patch.object(AccountService.export_accounts.__globals__["log_service"], "add") as log_mock:
                 exported = service.export_accounts(
                     actor={
                         "id": "admin-id",
@@ -130,11 +130,12 @@ class AccountTokenPrivacyTests(unittest.TestCase):
         token = "raw-secret-update-token"
         public_item = {"id": "token-id", "access_token": "token:masked", "quota": 3}
 
+        account_service_obj = create_router.__globals__["account_service"]
         with (
-            patch("api.accounts.require_admin", return_value={"role": "admin"}),
-            patch("api.accounts.account_service.update_account", return_value={"access_token": token, "quota": 3}),
-            patch("api.accounts.account_service.public_account", return_value=public_item),
-            patch("api.accounts.account_service.list_accounts", return_value=[public_item]),
+            patch.dict(create_router.__globals__, {"require_admin": lambda authorization: {"role": "admin"}}),
+            patch.object(account_service_obj, "update_account", return_value={"access_token": token, "quota": 3}),
+            patch.object(account_service_obj, "public_account", return_value=public_item),
+            patch.object(account_service_obj, "list_accounts", return_value=[public_item]),
         ):
             with TestClient(app) as client:
                 response = client.post(
@@ -153,13 +154,18 @@ class AccountTokenPrivacyTests(unittest.TestCase):
         token_ref = "token:masked"
         public_item = {"id": "token-id", "token_ref": token_ref, "access_token": token_ref, "quota": 3}
 
+        account_service_obj = create_router.__globals__["account_service"]
         with (
-            patch("api.accounts.require_admin", return_value={"role": "admin"}),
-            patch("api.accounts.account_service.delete_accounts", return_value={"removed": 1, "items": []}) as delete_mock,
-            patch("api.accounts.account_service.refresh_accounts", return_value={"refreshed": 1, "errors": [], "items": [public_item]}) as refresh_mock,
-            patch("api.accounts.account_service.update_account", return_value={"access_token": "raw-secret", "quota": 4}) as update_mock,
-            patch("api.accounts.account_service.public_account", return_value={**public_item, "quota": 4}),
-            patch("api.accounts.account_service.list_accounts", return_value=[{**public_item, "quota": 4}]),
+            patch.dict(create_router.__globals__, {"require_admin": lambda authorization: {"role": "admin"}}),
+            patch.object(account_service_obj, "delete_accounts", return_value={"removed": 1, "items": []}) as delete_mock,
+            patch.object(
+                account_service_obj,
+                "refresh_accounts",
+                return_value={"refreshed": 1, "errors": [], "items": [public_item]},
+            ) as refresh_mock,
+            patch.object(account_service_obj, "update_account", return_value={"access_token": "raw-secret", "quota": 4}) as update_mock,
+            patch.object(account_service_obj, "public_account", return_value={**public_item, "quota": 4}),
+            patch.object(account_service_obj, "list_accounts", return_value=[{**public_item, "quota": 4}]),
         ):
             with TestClient(app) as client:
                 delete_response = client.request(
@@ -201,6 +207,51 @@ class AccountRefreshRedactionTests(unittest.TestCase):
             self.assertIn("access_token", result["errors"][0])
             self.assertNotEqual(result["errors"][0]["access_token"], token)
             self.assertNotIn(token, str(result["errors"][0]))
+
+    def test_token_invalid_error_marks_account_abnormal_when_auto_remove_is_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = "raw-secret-invalid-token"
+            service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
+            service.add_accounts([token])
+            service.update_account(token, {"status": "正常", "quota": 5})
+
+            with (
+                patch.dict("services.account_service.config.data", {"auto_remove_invalid_accounts": False}),
+                patch.object(
+                    service,
+                    "fetch_remote_info",
+                    side_effect=RuntimeError("authentication token has been invalidated"),
+                ),
+            ):
+                result = service.refresh_accounts([token])
+
+            account = service.get_account(token)
+            self.assertEqual(result["refreshed"], 0)
+            self.assertEqual(len(result["errors"]), 1)
+            self.assertEqual(service.list_tokens(), [token])
+            self.assertIsNotNone(account)
+            self.assertEqual(account["status"], "异常")
+            self.assertEqual(account["quota"], 0)
+            self.assertFalse(AccountService._is_image_account_available(account))
+            self.assertFalse(service.has_available_account())
+
+    def test_rate_limit_error_marks_account_limited_during_batch_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = "raw-secret-limited-token"
+            service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
+            service.add_accounts([token])
+            service.update_account(token, {"status": "正常", "quota": 5})
+
+            with patch.object(service, "fetch_remote_info", side_effect=RuntimeError("status=429 usage limit reached")):
+                result = service.refresh_accounts([token])
+
+            account = service.get_account(token)
+            self.assertEqual(result["refreshed"], 0)
+            self.assertEqual(len(result["errors"]), 1)
+            self.assertIsNotNone(account)
+            self.assertEqual(account["status"], "限流")
+            self.assertEqual(account["quota"], 0)
+            self.assertFalse(AccountService._is_image_account_available(account))
 
 
 class JSONAccountStorageTests(unittest.TestCase):
@@ -276,7 +327,8 @@ class DatabaseAccountStorageTests(unittest.TestCase):
             service = AccountService(DatabaseStorageBackend(backend_url))
             service.add_accounts(["token-a"])
 
-            with patch.dict("services.account_service.config.data", {"auto_remove_rate_limited_accounts": True}):
+            account_config = AccountService.update_account.__globals__["config"]
+            with patch.dict(account_config.data, {"auto_remove_rate_limited_accounts": True}):
                 result = service.update_account("token-a", {"status": "限流", "quota": 0})
 
             self.assertIsNone(result)

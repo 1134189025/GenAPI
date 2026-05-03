@@ -17,6 +17,7 @@ PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
+GGB_PER_IMAGE = 5
 
 
 class UserGalleryAPITests(unittest.TestCase):
@@ -78,7 +79,7 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return str(response.json()["token"])
 
-    def create_user(self, email: str, *, image_quota: int = 1) -> tuple[str, dict[str, str]]:
+    def create_user(self, email: str, *, image_quota: int = GGB_PER_IMAGE) -> tuple[str, dict[str, str]]:
         created = self.client.post(
             "/api/admin/users",
             headers=self.admin_headers,
@@ -185,7 +186,7 @@ class UserGalleryAPITests(unittest.TestCase):
         )
 
     def test_image_generation_success_writes_gallery_record_and_augments_response(self) -> None:
-        _, headers = self.create_user("generator@example.com", image_quota=1)
+        _, headers = self.create_user("generator@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch(
             "api.ai.openai_v1_image_generations.handle",
@@ -216,7 +217,7 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 0)
 
     def test_image_generation_records_target_and_actual_resolution_metadata(self) -> None:
-        _, headers = self.create_user("resolution-generator@example.com", image_quota=1)
+        _, headers = self.create_user("resolution-generator@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch(
             "api.ai.openai_v1_image_generations.handle",
@@ -246,7 +247,7 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(gallery_item["target_height"], 864)
 
     def test_image_generation_rejects_non_preset_resolution(self) -> None:
-        _, headers = self.create_user("bad-resolution@example.com", image_quota=1)
+        _, headers = self.create_user("bad-resolution@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch("api.ai.openai_v1_image_generations.handle") as handle:
             response = self.client.post(
@@ -258,10 +259,10 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("unsupported image size", response.text)
         handle.assert_not_called()
-        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], GGB_PER_IMAGE)
 
     def test_image_edit_success_writes_gallery_record(self) -> None:
-        _, headers = self.create_user("editor@example.com", image_quota=1)
+        _, headers = self.create_user("editor@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch(
             "api.ai.openai_v1_image_edit.handle",
@@ -282,7 +283,7 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(self.client.get(item["content_url"], headers=headers).content, PNG_BYTES)
 
     def test_image_edit_rejects_non_preset_resolution_before_spending_quota(self) -> None:
-        _, headers = self.create_user("bad-edit-resolution@example.com", image_quota=1)
+        _, headers = self.create_user("bad-edit-resolution@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch("api.ai.openai_v1_image_edit.handle") as handle:
             response = self.client.post(
@@ -295,10 +296,10 @@ class UserGalleryAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("unsupported image size", response.text)
         handle.assert_not_called()
-        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], GGB_PER_IMAGE)
 
     def test_failed_image_generation_does_not_write_gallery_record_or_spend_quota(self) -> None:
-        _, headers = self.create_user("failed@example.com", image_quota=1)
+        _, headers = self.create_user("failed@example.com", image_quota=GGB_PER_IMAGE)
 
         with patch("api.ai.openai_v1_image_generations.handle", side_effect=RuntimeError("upstream failed")):
             response = self.client.post(
@@ -311,7 +312,7 @@ class UserGalleryAPITests(unittest.TestCase):
         listed = self.client.get("/api/gallery/images", headers=headers)
         self.assertEqual(listed.status_code, 200, listed.text)
         self.assertEqual(listed.json()["items"], [])
-        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], GGB_PER_IMAGE)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
+GGB_PER_IMAGE = 5
 
 
 class UserManagementAPITests(unittest.TestCase):
@@ -110,6 +111,11 @@ class UserManagementAPITests(unittest.TestCase):
 
     def user_service(self):
         return importlib.import_module("services.user_service").user_service
+
+    def assert_user_ggb(self, user: dict[str, object], expected_ggb: int) -> None:
+        self.assertIn("ggb", user)
+        self.assertEqual(user["ggb"], expected_ggb)
+        self.assertEqual(user["image_quota"], expected_ggb)
 
     def test_openai_compatible_v1_routes_are_not_exposed(self) -> None:
         for method, path, payload in [
@@ -380,7 +386,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 1,
+                "image_quota": GGB_PER_IMAGE,
                 "image_concurrency": 1,
             },
         )
@@ -424,7 +430,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 1,
+                "image_quota": GGB_PER_IMAGE,
                 "image_concurrency": 1,
             },
         )
@@ -441,7 +447,7 @@ class UserManagementAPITests(unittest.TestCase):
                 json={"prompt": "draw", "model": "gpt-image-2", "n": 1},
         )
         self.assertEqual(response.status_code, 502, response.text)
-        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).json()["user"]["image_quota"], GGB_PER_IMAGE)
 
     def test_concurrent_failed_image_settlements_refund_all_reserved_quota(self) -> None:
         admin_token = self.create_admin()
@@ -453,7 +459,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 2,
+                "image_quota": 2 * GGB_PER_IMAGE,
                 "image_concurrency": 2,
             },
         )
@@ -499,7 +505,7 @@ class UserManagementAPITests(unittest.TestCase):
 
         listed_after = self.client.get("/api/admin/users", headers=self.auth_headers(admin_token)).json()["items"]
         target_after = next(user for user in listed_after if user["id"] == user_id)
-        self.assertEqual(target_after["image_quota"], 2)
+        self.assertEqual(target_after["image_quota"], 2 * GGB_PER_IMAGE)
         self.assertEqual(target_after["active_image_requests"], 0)
 
     def test_stale_reserved_image_usage_events_are_recovered_once(self) -> None:
@@ -512,7 +518,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 2,
+                "image_quota": 2 * GGB_PER_IMAGE,
                 "image_concurrency": 2,
             },
         )
@@ -538,7 +544,7 @@ class UserManagementAPITests(unittest.TestCase):
         after = service.get_user(user_id)
         self.assertEqual(recovered, 1)
         self.assertEqual(recovered_again, 0)
-        self.assertEqual(after["image_quota"], 2)
+        self.assertEqual(after["image_quota"], 2 * GGB_PER_IMAGE)
         self.assertEqual(after["active_image_requests"], 0)
 
     def test_startup_stale_recovery_waits_six_hours_by_default_and_honors_env_override(self) -> None:
@@ -551,7 +557,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 2,
+                "image_quota": 2 * GGB_PER_IMAGE,
                 "image_concurrency": 2,
             },
         )
@@ -569,7 +575,7 @@ class UserManagementAPITests(unittest.TestCase):
 
         second_service = service_module.UserService(service.database_url)
         try:
-            self.assertEqual(service.get_user(user_id)["image_quota"], 1)
+            self.assertEqual(service.get_user(user_id)["image_quota"], GGB_PER_IMAGE)
             self.assertEqual(service.get_user(user_id)["active_image_requests"], 1)
         finally:
             second_service.engine.dispose()
@@ -578,7 +584,7 @@ class UserManagementAPITests(unittest.TestCase):
         os.environ["GENAPI_STALE_IMAGE_QUOTA_RECOVERY_THROTTLE_SECONDS"] = "0"
         third_service = service_module.UserService(service.database_url)
         try:
-            self.assertEqual(service.get_user(user_id)["image_quota"], 2)
+            self.assertEqual(service.get_user(user_id)["image_quota"], 2 * GGB_PER_IMAGE)
             self.assertEqual(service.get_user(user_id)["active_image_requests"], 0)
         finally:
             third_service.engine.dispose()
@@ -607,7 +613,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 1,
+                "image_quota": GGB_PER_IMAGE,
                 "image_concurrency": 1,
             },
         )
@@ -647,7 +653,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 1,
+                "image_quota": GGB_PER_IMAGE,
                 "image_concurrency": 1,
             },
         )
@@ -687,7 +693,7 @@ class UserManagementAPITests(unittest.TestCase):
                 "password": "UserPass123!",
                 "role": "user",
                 "enabled": True,
-                "image_quota": 1,
+                "image_quota": GGB_PER_IMAGE,
                 "image_concurrency": 1,
             },
         )
@@ -709,7 +715,7 @@ class UserManagementAPITests(unittest.TestCase):
                 )
 
         user = self.client.get("/api/auth/me", headers=headers).json()["user"]
-        self.assertEqual(user["image_quota"], 1)
+        self.assertEqual(user["image_quota"], GGB_PER_IMAGE)
         self.assertEqual(user["active_image_requests"], 0)
 
     def test_image_edit_rejects_too_many_uploads_before_handler(self) -> None:
@@ -1382,6 +1388,125 @@ class UserManagementAPITests(unittest.TestCase):
 
         reused = self.client.post("/api/redeem", headers=headers, json={"code": quota_code})
         self.assertEqual(reused.status_code, 400)
+
+    def test_redeem_image_quota_code_awards_ggb(self) -> None:
+        admin_token = self.create_admin()
+        user = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "redeem-ggb@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 0,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(user.status_code, 200, user.text)
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "redeem-ggb@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        headers = self.auth_headers(login.json()["token"])
+        code = self.client.post(
+            "/api/admin/redeem-codes/generate",
+            headers=self.auth_headers(admin_token),
+            json={"type": "image_quota", "value": 13, "count": 1},
+        ).json()["codes"][0]["code"]
+
+        redeemed = self.client.post("/api/redeem", headers=headers, json={"code": code})
+
+        self.assertEqual(redeemed.status_code, 200, redeemed.text)
+        self.assert_user_ggb(redeemed.json()["user"], 13)
+        me = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me.status_code, 200, me.text)
+        self.assert_user_ggb(me.json()["user"], 13)
+
+    def test_admin_user_legacy_image_quota_and_ggb_fields_are_consistent(self) -> None:
+        admin_token = self.create_admin()
+        headers = self.auth_headers(admin_token)
+        created = self.client.post(
+            "/api/admin/users",
+            headers=headers,
+            json={
+                "email": "ggb-compat@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": 11,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        user_id = created.json()["item"]["id"]
+        self.assert_user_ggb(created.json()["item"], 11)
+
+        updated = self.client.patch(
+            f"/api/admin/users/{user_id}",
+            headers=headers,
+            json={"ggb": 23},
+        )
+
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assert_user_ggb(updated.json()["item"], 23)
+        listed = self.client.get("/api/admin/users", headers=headers)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        listed_user = next(item for item in listed.json()["items"] if item["id"] == user_id)
+        self.assert_user_ggb(listed_user, 23)
+
+    def test_admin_create_endpoints_accept_ggb_aliases_without_legacy_fields(self) -> None:
+        admin_token = self.create_admin()
+        headers = self.auth_headers(admin_token)
+
+        created_user = self.client.post(
+            "/api/admin/users",
+            headers=headers,
+            json={
+                "email": "ggb-alias-create@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "ggb": 17,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(created_user.status_code, 200, created_user.text)
+        self.assert_user_ggb(created_user.json()["item"], 17)
+
+        created_plan = self.client.post(
+            "/api/admin/membership-plans",
+            headers=headers,
+            json={
+                "name": "GGB 别名卡",
+                "duration_days": 3,
+                "period_days": 1,
+                "period_ggb": 33,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created_plan.status_code, 200, created_plan.text)
+        self.assertEqual(created_plan.json()["item"]["period_image_quota"], 33)
+        self.assertEqual(created_plan.json()["item"]["period_ggb"], 33)
+
+        generated_code = self.client.post(
+            "/api/admin/redeem-codes/generate",
+            headers=headers,
+            json={"type": "image_quota", "ggb_value": 19, "count": 1},
+        )
+        self.assertEqual(generated_code.status_code, 200, generated_code.text)
+        self.assertEqual(generated_code.json()["codes"][0]["value"], 19)
+        self.assertEqual(generated_code.json()["codes"][0]["ggb_value"], 19)
+
+        created_promo = self.client.post(
+            "/api/admin/promo-codes",
+            headers=headers,
+            json={"code": "GGBALIAS", "ggb_amount": 21, "max_uses": 2},
+        )
+        self.assertEqual(created_promo.status_code, 200, created_promo.text)
+        self.assertEqual(created_promo.json()["item"]["image_quota"], 21)
+        self.assertEqual(created_promo.json()["item"]["ggb_amount"], 21)
 
     def test_same_redeem_code_cannot_be_used_by_two_concurrent_requests(self) -> None:
         admin_token = self.create_admin()

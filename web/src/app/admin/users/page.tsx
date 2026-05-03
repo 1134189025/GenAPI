@@ -238,7 +238,7 @@ export default function AdminUsersPage() {
       <PageHeader
         eyebrow="Users"
         title="用户管理"
-        description="管理后台用户身份、登录状态、图片额度和并发限制。当前会话用户不能在界面中被禁用或删除。"
+        description="管理后台用户身份、登录状态、GGB 余额和图片并发限制。当前会话用户不能在界面中被禁用或删除。"
         actions={
           <>
             <Button
@@ -262,8 +262,8 @@ export default function AdminUsersPage() {
         <StatCard label="用户总数" value={summary.total} icon={<Users className="size-5" />} tone="slate" />
         <StatCard label="已启用" value={summary.enabled} icon={<UserCheck className="size-5" />} tone="emerald" />
         <StatCard label="管理员" value={summary.admins} icon={<ShieldCheck className="size-5" />} tone="teal" />
-        <StatCard label="图片额度" value={summary.quota} icon={<Plus className="size-5" />} tone="blue" />
-        <StatCard label="会员额度" value={summary.memberQuota} icon={<Plus className="size-5" />} tone="amber" />
+        <StatCard label="GGB 余额" value={`${summary.quota} GGB`} icon={<Plus className="size-5" />} tone="blue" />
+        <StatCard label="会员 GGB" value={`${summary.memberQuota} GGB`} icon={<Plus className="size-5" />} tone="amber" />
       </div>
 
       <DataPanel
@@ -343,8 +343,8 @@ export default function AdminUsersPage() {
                   <TableHead>用户</TableHead>
                   <TableHead>角色</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>图片额度</TableHead>
-                  <TableHead>会员额度</TableHead>
+                  <TableHead>GGB 余额</TableHead>
+                  <TableHead>会员 GGB</TableHead>
                   <TableHead>会员状态</TableHead>
                   <TableHead>图片并发</TableHead>
                   <TableHead>活动请求</TableHead>
@@ -389,8 +389,8 @@ export default function AdminUsersPage() {
                           {status.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-slate-700">{item.total_image_quota ?? item.image_quota}</TableCell>
-                      <TableCell className="font-medium text-slate-700">{item.member_image_quota ?? 0}</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.total_image_quota ?? item.image_quota} GGB</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.member_image_quota ?? 0} GGB</TableCell>
                       <TableCell>
                         <Badge variant={item.membership_status === "active" ? "warning" : "secondary"} className="rounded-md">
                           {item.membership_status === "active" ? item.membership_plan_name || "会员" : item.membership_status === "expired" ? "已过期" : "未开通"}
@@ -516,7 +516,7 @@ function UserFormDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? "编辑用户" : "创建用户"}</DialogTitle>
           <DialogDescription>
-            {isEdit ? "更新邮箱、密码、角色、启用状态和图片资源限制。" : "创建可登录的后台用户，并设置初始图片资源限制。"}
+            {isEdit ? "更新邮箱、密码、角色、启用状态、GGB 余额和图片并发限制。" : "创建可登录的后台用户，并设置初始 GGB 余额和图片并发限制。"}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
@@ -569,7 +569,7 @@ function UserFormDialog({
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>图片额度</FieldLabel>
+              <FieldLabel>GGB 余额</FieldLabel>
               <Input
                 value={form.image_quota}
                 type="number"

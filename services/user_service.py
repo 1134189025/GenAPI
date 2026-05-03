@@ -33,6 +33,7 @@ from sqlalchemy import (
     delete,
     exists,
     inspect,
+    text,
     update,
 )
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +48,7 @@ RedeemCodeType = Literal["image_quota", "concurrency", "invitation", "membership
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 JWT_ALGORITHM = "HS256"
+IMAGE_COST_GGB = 5
 LOGIN_FAILURE_THRESHOLD = 5
 LOGIN_FAILURE_INITIAL_LOCK_SECONDS = 60
 LOGIN_FAILURE_MAX_LOCK_SECONDS = 900
@@ -119,6 +121,13 @@ class UserModel(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class SchemaMigrationModel(Base):
+    __tablename__ = "schema_migrations"
+
+    key = Column(String(128), primary_key=True)
+    applied_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
 class AuthSettingModel(Base):
@@ -273,6 +282,15 @@ class ImageUsageEventModel(Base):
     regular_actual_count = Column(Integer, nullable=False, default=0)
     member_refunded_count = Column(Integer, nullable=False, default=0)
     regular_refunded_count = Column(Integer, nullable=False, default=0)
+    requested_ggb = Column(Integer, nullable=False, default=0)
+    actual_ggb = Column(Integer, nullable=False, default=0)
+    refunded_ggb = Column(Integer, nullable=False, default=0)
+    member_reserved_ggb = Column(Integer, nullable=False, default=0)
+    regular_reserved_ggb = Column(Integer, nullable=False, default=0)
+    member_actual_ggb = Column(Integer, nullable=False, default=0)
+    regular_actual_ggb = Column(Integer, nullable=False, default=0)
+    member_refunded_ggb = Column(Integer, nullable=False, default=0)
+    regular_refunded_ggb = Column(Integer, nullable=False, default=0)
     status = Column(String(32), nullable=False, default="reserved", index=True)
     error = Column(Text, nullable=False, default="")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
@@ -328,10 +346,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "verify_send_cooldown_seconds": 60,
     "verify_max_attempts": 5,
     "checkin_enabled": True,
-    "checkin_daily_image_quota": 1,
+    "checkin_daily_image_quota": 5,
     "checkin_streak_bonus_enabled": True,
     "checkin_streak_bonus_days": 7,
-    "checkin_streak_bonus_image_quota": 3,
+    "checkin_streak_bonus_image_quota": 15,
     "checkin_timezone": "Asia/Shanghai",
     "smtp_host": "",
     "smtp_port": 587,
@@ -358,6 +376,9 @@ class QuotaReservation:
     requested_count: int
     member_reserved_count: int = 0
     regular_reserved_count: int = 0
+    requested_ggb: int = 0
+    member_reserved_ggb: int = 0
+    regular_reserved_ggb: int = 0
     membership_source_redeem_code_id: str = ""
     membership_activation_key: str = ""
     bypass: bool = False
@@ -430,6 +451,15 @@ class UserService:
                 "regular_actual_count",
                 "member_refunded_count",
                 "regular_refunded_count",
+                "requested_ggb",
+                "actual_ggb",
+                "refunded_ggb",
+                "member_reserved_ggb",
+                "regular_reserved_ggb",
+                "member_actual_ggb",
+                "regular_actual_ggb",
+                "member_refunded_ggb",
+                "regular_refunded_ggb",
             }:
                 add_column("image_usage_events", name, Integer(), "NOT NULL DEFAULT 0")
             add_column("image_usage_events", "membership_source_redeem_code_id", String(36))
@@ -485,6 +515,102 @@ class UserService:
                     "CREATE INDEX IF NOT EXISTS ix_user_gallery_sha256 "
                     "ON user_gallery_images (sha256)"
                 )
+        self._run_ggb_v1_migration(set(inspector.get_table_names()))
+
+    def _run_ggb_v1_migration(self, table_names: set[str]) -> None:
+        migration_key = "ggb_v1"
+        with self.engine.begin() as connection:
+            SchemaMigrationModel.__table__.create(bind=connection, checkfirst=True)
+            marker_result = connection.execute(
+                text(
+                    "INSERT INTO schema_migrations (key, applied_at) "
+                    "VALUES (:key, :applied_at) "
+                    "ON CONFLICT (key) DO NOTHING"
+                ),
+                {"key": migration_key, "applied_at": utc_now()},
+            )
+            if marker_result.rowcount != 1:
+                return
+
+            if "users" in table_names:
+                connection.execute(
+                    text("UPDATE users SET image_quota = COALESCE(image_quota, 0) * :cost"),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "user_memberships" in table_names:
+                connection.execute(
+                    text(
+                        "UPDATE user_memberships SET "
+                        "member_image_quota = COALESCE(member_image_quota, 0) * :cost, "
+                        "period_image_quota = COALESCE(period_image_quota, 0) * :cost"
+                    ),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "membership_plans" in table_names:
+                connection.execute(
+                    text("UPDATE membership_plans SET period_image_quota = COALESCE(period_image_quota, 0) * :cost"),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "daily_checkins" in table_names:
+                connection.execute(
+                    text("UPDATE daily_checkins SET reward_image_quota = COALESCE(reward_image_quota, 0) * :cost"),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "promo_codes" in table_names:
+                connection.execute(
+                    text("UPDATE promo_codes SET image_quota = COALESCE(image_quota, 0) * :cost"),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "redeem_codes" in table_names:
+                connection.execute(
+                    text("UPDATE redeem_codes SET value = COALESCE(value, 0) * :cost WHERE type = 'image_quota'"),
+                    {"cost": IMAGE_COST_GGB},
+                )
+                rows = connection.execute(
+                    text("SELECT id, metadata FROM redeem_codes WHERE type = 'membership' AND metadata IS NOT NULL AND metadata != ''")
+                ).fetchall()
+                for row in rows:
+                    metadata = json_loads(row[1] or "", {})
+                    if not isinstance(metadata, dict) or "period_image_quota" not in metadata:
+                        continue
+                    metadata["period_image_quota"] = max(0, int(metadata.get("period_image_quota") or 0)) * IMAGE_COST_GGB
+                    connection.execute(
+                        text("UPDATE redeem_codes SET metadata = :metadata WHERE id = :id"),
+                        {"metadata": json_dumps(metadata), "id": row[0]},
+                    )
+            if "image_usage_events" in table_names:
+                connection.execute(
+                    text(
+                        "UPDATE image_usage_events SET "
+                        "requested_ggb = COALESCE(requested_count, 0) * :cost, "
+                        "actual_ggb = COALESCE(actual_count, 0) * :cost, "
+                        "refunded_ggb = COALESCE(refunded_count, 0) * :cost, "
+                        "member_reserved_ggb = COALESCE(member_reserved_count, 0) * :cost, "
+                        "regular_reserved_ggb = COALESCE(regular_reserved_count, 0) * :cost, "
+                        "member_actual_ggb = COALESCE(member_actual_count, 0) * :cost, "
+                        "regular_actual_ggb = COALESCE(regular_actual_count, 0) * :cost, "
+                        "member_refunded_ggb = COALESCE(member_refunded_count, 0) * :cost, "
+                        "regular_refunded_ggb = COALESCE(regular_refunded_count, 0) * :cost"
+                    ),
+                    {"cost": IMAGE_COST_GGB},
+                )
+            if "auth_settings" in table_names:
+                for key in {"default_image_quota", "checkin_daily_image_quota", "checkin_streak_bonus_image_quota"}:
+                    row = connection.execute(
+                        text("SELECT value FROM auth_settings WHERE key = :key"),
+                        {"key": key},
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    raw_value = json_loads(row[0], 0)
+                    try:
+                        next_value = max(0, int(raw_value or 0)) * IMAGE_COST_GGB
+                    except (TypeError, ValueError):
+                        next_value = 0
+                    connection.execute(
+                        text("UPDATE auth_settings SET value = :value, updated_at = :updated_at WHERE key = :key"),
+                        {"value": json_dumps(next_value), "updated_at": utc_now(), "key": key},
+                    )
 
     @staticmethod
     def _env_int(names: tuple[str, ...], default: int) -> int:
@@ -600,9 +726,9 @@ class UserService:
                 changed = True
             if session.query(MembershipPlanModel).count() == 0:
                 defaults = [
-                    ("日卡", "激活后 1 天内可用，每周期 1 天刷新额度。", 1, 1, 10, 10),
-                    ("周卡", "激活后 7 天内可用，每周期 7 天刷新额度。", 7, 7, 80, 20),
-                    ("月卡", "激活后 30 天内可用，每周期 30 天刷新额度。", 30, 30, 360, 30),
+                    ("日卡", "激活后 1 天内可用，每周期 1 天刷新 GGB。", 1, 1, 50, 10),
+                    ("周卡", "激活后 7 天内可用，每周期 7 天刷新 GGB。", 7, 7, 400, 20),
+                    ("月卡", "激活后 30 天内可用，每周期 30 天刷新 GGB。", 30, 30, 1800, 30),
                 ]
                 for name, description, duration_days, period_days, period_quota, sort_order in defaults:
                     session.add(
@@ -644,12 +770,24 @@ class UserService:
         settings.pop("jwt_secret", None)
         settings["has_smtp_password"] = bool(clean_string(settings.get("smtp_password")))
         settings["smtp_password"] = ""
+        settings["default_ggb_balance"] = int(settings.get("default_image_quota") or 0)
+        settings["checkin_daily_ggb"] = int(settings.get("checkin_daily_image_quota") or 0)
+        settings["checkin_streak_bonus_ggb"] = int(settings.get("checkin_streak_bonus_image_quota") or 0)
+        settings["image_cost_ggb"] = IMAGE_COST_GGB
         return settings
 
     def update_settings(self, updates: dict[str, object]) -> dict[str, object]:
         allowed = set(DEFAULT_SETTINGS)
+        alias_keys = {
+            "default_ggb_balance": "default_image_quota",
+            "checkin_daily_ggb": "checkin_daily_image_quota",
+            "checkin_streak_bonus_ggb": "checkin_streak_bonus_image_quota",
+        }
+        normalized_updates: dict[str, object] = {}
+        for key, value in dict(updates or {}).items():
+            normalized_updates[alias_keys.get(key, key)] = value
         with self._settings_lock, self.Session() as session:
-            for key, value in dict(updates or {}).items():
+            for key, value in normalized_updates.items():
                 if key not in allowed:
                     continue
                 if key == "smtp_password" and clean_string(value) == "":
@@ -799,13 +937,19 @@ class UserService:
     def _serialize_membership(self, membership: UserMembershipModel | None) -> dict[str, object] | None:
         if membership is None:
             return None
+        member_quota = int(membership.member_image_quota or 0)
+        period_quota = int(membership.period_image_quota or 0)
         return {
             "id": membership.id,
             "plan_id": membership.plan_id,
             "plan_name": membership.plan_name,
             "status": membership.status,
-            "member_image_quota": int(membership.member_image_quota or 0),
-            "period_image_quota": int(membership.period_image_quota or 0),
+            "member_image_quota": member_quota,
+            "period_image_quota": period_quota,
+            "member_ggb": member_quota,
+            "period_ggb": period_quota,
+            "member_ggb_balance": member_quota,
+            "period_ggb_quota": period_quota,
             "duration_days": int(membership.duration_days or 0),
             "period_days": int(membership.period_days or 0),
             "activated_at": iso(membership.activated_at),
@@ -814,7 +958,7 @@ class UserService:
             "current_period_ends_at": iso(membership.current_period_ends_at),
         }
 
-    def _membership_activation_key(self, membership: UserMembershipModel | None) -> str:
+    def _legacy_membership_activation_key(self, membership: UserMembershipModel | None) -> str:
         if membership is None:
             return ""
         return "|".join(
@@ -825,6 +969,55 @@ class UserService:
                 iso(membership.expires_at) or "",
             ]
         )
+
+    def _membership_activation_key(self, membership: UserMembershipModel | None) -> str:
+        legacy_key = self._legacy_membership_activation_key(membership)
+        if not legacy_key:
+            return ""
+        return "|".join(
+            [
+                legacy_key,
+                iso(membership.current_period_started_at) or "",
+                iso(membership.current_period_ends_at) or "",
+            ]
+        )
+
+    def _membership_period_matches_event(
+        self,
+        membership: UserMembershipModel | None,
+        event_created_at: datetime | None,
+    ) -> bool:
+        if membership is None:
+            return False
+        created = as_utc(event_created_at)
+        period_start = as_utc(membership.current_period_started_at)
+        period_end = as_utc(membership.current_period_ends_at)
+        if created is None or period_start is None:
+            return False
+        if period_end is not None:
+            return period_start <= created < period_end
+        return period_start <= created
+
+    def _membership_refund_matches(
+        self,
+        membership: UserMembershipModel | None,
+        *,
+        activation_key: str,
+        source_redeem_code_id: str,
+        event_created_at: datetime | None,
+    ) -> bool:
+        if membership is None:
+            return False
+        event_activation_key = clean_string(activation_key)
+        if event_activation_key and self._membership_activation_key(membership) == event_activation_key:
+            return True
+        if event_activation_key and self._legacy_membership_activation_key(membership) == event_activation_key:
+            return self._membership_period_matches_event(membership, event_created_at)
+        current_source = clean_string(membership.source_redeem_code_id)
+        event_source = clean_string(source_redeem_code_id)
+        if not event_activation_key and event_source and current_source == event_source:
+            return self._membership_period_matches_event(membership, event_created_at)
+        return False
 
     def _refresh_user_membership(self, session, user_id: str, now: datetime | None = None) -> UserMembershipModel | None:
         current = now or utc_now()
@@ -870,6 +1063,13 @@ class UserService:
             "image_quota": regular_quota,
             "member_image_quota": member_quota,
             "total_image_quota": regular_quota + member_quota,
+            "ggb": regular_quota,
+            "member_ggb": member_quota,
+            "total_ggb": regular_quota + member_quota,
+            "regular_ggb_balance": regular_quota,
+            "member_ggb_balance": member_quota,
+            "total_ggb_balance": regular_quota + member_quota,
+            "image_cost_ggb": IMAGE_COST_GGB,
             "membership": membership_payload,
             "membership_status": str(membership.status) if membership is not None else "inactive",
             "membership_plan_id": membership.plan_id if membership is not None else None,
@@ -1060,6 +1260,23 @@ class UserService:
         return max(minimum, value)
 
     @staticmethod
+    def _payload_int(
+        payload: dict[str, object],
+        keys: tuple[str, ...],
+        default: int = 0,
+        *,
+        minimum: int = 0,
+    ) -> int:
+        for key in keys:
+            if key not in payload:
+                continue
+            try:
+                return max(minimum, int(payload.get(key) or 0))
+            except (TypeError, ValueError):
+                return max(minimum, default)
+        return max(minimum, default)
+
+    @staticmethod
     def _checkin_timezone_name(settings: dict[str, object]) -> str:
         timezone_name = clean_string(settings.get("checkin_timezone")) or str(DEFAULT_SETTINGS["checkin_timezone"])
         try:
@@ -1127,10 +1344,13 @@ class UserService:
             "streak_days": streak_days,
             "last_checkin_date": self._date_iso(last_row.checkin_date if last_row is not None else None),
             "reward_image_quota": reward,
+            "reward_ggb": reward,
             "daily_image_quota": self._setting_int(settings, "checkin_daily_image_quota", 1),
+            "daily_ggb": self._setting_int(settings, "checkin_daily_image_quota", 1),
             "streak_bonus_enabled": bool(settings.get("checkin_streak_bonus_enabled", True)),
             "streak_bonus_days": self._setting_int(settings, "checkin_streak_bonus_days", 7, minimum=1),
             "streak_bonus_image_quota": self._setting_int(settings, "checkin_streak_bonus_image_quota", 3),
+            "streak_bonus_ggb": self._setting_int(settings, "checkin_streak_bonus_image_quota", 3),
             "timezone": self._checkin_timezone_name(settings),
         }
 
@@ -1176,6 +1396,7 @@ class UserService:
             "already_checked_in": True,
             "checkin_date": today.isoformat(),
             "reward_image_quota": 0,
+            "reward_ggb": 0,
             "streak_days": int(row.streak_days or 0),
             "user": self._serialize_user(user, membership),
         }
@@ -1265,6 +1486,7 @@ class UserService:
                 "already_checked_in": False,
                 "checkin_date": today.isoformat(),
                 "reward_image_quota": reward,
+                "reward_ggb": reward,
                 "streak_days": streak_days,
                 "user": self._serialize_user(user, membership),
             }
@@ -1317,6 +1539,7 @@ class UserService:
 
     def update_user(self, user_id: str, updates: dict[str, object]) -> dict[str, object]:
         with self._admin_mutation_lock, self.Session() as session:
+            updates = dict(updates or {})
             if any(key in updates for key in {"role", "enabled"}):
                 self._lock_enabled_admins(session)
             user = session.get(UserModel, clean_string(user_id))
@@ -1339,8 +1562,9 @@ class UserService:
                 values["enabled"] = next_enabled
                 if bool(user.enabled) and not next_enabled:
                     next_token_version += 1
-            if "image_quota" in updates:
-                values["image_quota"] = max(0, int(updates.get("image_quota") or 0))
+            quota_keys = ("image_quota", "ggb", "ggb_balance", "regular_ggb", "regular_ggb_balance")
+            if any(key in updates for key in quota_keys):
+                values["image_quota"] = self._payload_int(updates, quota_keys)
             if "image_concurrency" in updates:
                 values["image_concurrency"] = max(1, int(updates.get("image_concurrency") or 1)) if next_role == "user" else 0
             elif str(user.role) != "user" and next_role == "user" and int(user.image_concurrency or 0) < 1:
@@ -1382,6 +1606,12 @@ class UserService:
         *,
         partial: bool = False,
     ) -> dict[str, object]:
+        payload = dict(payload or {})
+        if "period_image_quota" not in payload:
+            for alias in ("period_ggb_quota", "period_ggb"):
+                if alias in payload:
+                    payload["period_image_quota"] = payload[alias]
+                    break
         values: dict[str, object] = {}
         if "name" in payload or not partial:
             name = clean_string(payload.get("name"))
@@ -1418,6 +1648,8 @@ class UserService:
             "duration_days": int(row.duration_days or 0),
             "period_days": int(row.period_days or 0),
             "period_image_quota": int(row.period_image_quota or 0),
+            "period_ggb": int(row.period_image_quota or 0),
+            "period_ggb_quota": int(row.period_image_quota or 0),
             "enabled": bool(row.enabled),
             "sort_order": int(row.sort_order or 0),
             "created_at": iso(row.created_at),
@@ -1831,6 +2063,8 @@ class UserService:
             "code_preview": f"{row.code_prefix}...{row.code_suffix}",
             "type": row.type,
             "value": int(row.value or 0),
+            "ggb": int(row.value or 0) if row.type == "image_quota" else 0,
+            "ggb_value": int(row.value or 0) if row.type == "image_quota" else 0,
             "membership_plan_id": row.membership_plan_id,
             "membership_plan": json_loads(row.metadata_json or "", {}) if row.type == "membership" else None,
             "enabled": bool(row.enabled),
@@ -1992,6 +2226,7 @@ class UserService:
             "id": row.id,
             "code_preview": f"{row.code_prefix}...{row.code_suffix}",
             "image_quota": int(row.image_quota or 0),
+            "ggb_amount": int(row.image_quota or 0),
             "max_uses": int(row.max_uses or 0),
             "used_count": int(row.used_count or 0),
             "enabled": bool(row.enabled),
@@ -2059,8 +2294,10 @@ class UserService:
             row = session.get(PromoCodeModel, clean_string(code_id))
             if row is None:
                 raise UserServiceError("promo code not found", status_code=404, code="not_found")
-            if "image_quota" in updates:
-                row.image_quota = max(0, int(updates.get("image_quota") or 0))
+            updates = dict(updates or {})
+            quota_keys = ("image_quota", "ggb", "ggb_amount", "ggb_value")
+            if any(key in updates for key in quota_keys):
+                row.image_quota = self._payload_int(updates, quota_keys)
             if "max_uses" in updates:
                 row.max_uses = max(1, int(updates.get("max_uses") or 1))
             if "enabled" in updates:
@@ -2082,7 +2319,8 @@ class UserService:
         if identity.get("role") == "admin":
             return QuotaReservation(event_id="", user_id=clean_string(identity.get("id")), requested_count=requested_count, bypass=True)
         user_id = clean_string(identity.get("id"))
-        amount = max(1, int(requested_count or 1))
+        image_count = max(1, int(requested_count or 1))
+        amount = image_count * IMAGE_COST_GGB
         self._recover_stale_image_quota_reservations_throttled()
         with self._quota_lock, self.Session() as session:
             now = utc_now()
@@ -2104,7 +2342,7 @@ class UserService:
             )
             regular_available = int(user.image_quota or 0)
             if member_available + regular_available < amount:
-                raise UserServiceError("insufficient image quota", status_code=429, code="insufficient_quota")
+                raise UserServiceError("insufficient GGB balance", status_code=429, code="insufficient_quota")
             member_to_use = min(member_available, amount)
             regular_to_use = amount - member_to_use
             membership_source_redeem_code_id = (
@@ -2123,9 +2361,12 @@ class UserService:
                 id=str(uuid.uuid4()),
                 user_id=user_id,
                 endpoint=endpoint,
-                requested_count=amount,
-                member_reserved_count=member_to_use,
-                regular_reserved_count=regular_to_use,
+                requested_count=image_count,
+                member_reserved_count=member_to_use // IMAGE_COST_GGB,
+                regular_reserved_count=regular_to_use // IMAGE_COST_GGB,
+                requested_ggb=amount,
+                member_reserved_ggb=member_to_use,
+                regular_reserved_ggb=regular_to_use,
                 membership_source_redeem_code_id=membership_source_redeem_code_id or None,
                 membership_activation_key=membership_activation_key,
                 status="reserved",
@@ -2136,9 +2377,12 @@ class UserService:
             return QuotaReservation(
                 event_id=event.id,
                 user_id=user_id,
-                requested_count=amount,
-                member_reserved_count=member_to_use,
-                regular_reserved_count=regular_to_use,
+                requested_count=image_count,
+                member_reserved_count=member_to_use // IMAGE_COST_GGB,
+                regular_reserved_count=regular_to_use // IMAGE_COST_GGB,
+                requested_ggb=amount,
+                member_reserved_ggb=member_to_use,
+                regular_reserved_ggb=regular_to_use,
                 membership_source_redeem_code_id=membership_source_redeem_code_id,
                 membership_activation_key=membership_activation_key,
             )
@@ -2156,24 +2400,47 @@ class UserService:
         now = utc_now()
         with self._quota_lock, self.Session() as session:
             actual = max(0, min(int(actual_count or 0), int(reservation.requested_count or 0))) if success else 0
+            actual_ggb = actual * IMAGE_COST_GGB
+            requested_ggb = max(0, int(reservation.requested_ggb or 0))
             member_reserved = max(0, int(reservation.member_reserved_count or 0))
             regular_reserved = max(0, int(reservation.regular_reserved_count or 0))
+            member_reserved_ggb = max(0, int(reservation.member_reserved_ggb or 0))
+            regular_reserved_ggb = max(0, int(reservation.regular_reserved_ggb or 0))
             membership_source_redeem_code_id = clean_string(reservation.membership_source_redeem_code_id)
             membership_activation_key = clean_string(reservation.membership_activation_key)
-            if member_reserved + regular_reserved <= 0:
-                event = session.get(ImageUsageEventModel, reservation.event_id)
-                if event is not None:
+            event_created_at: datetime | None = None
+            event = session.get(ImageUsageEventModel, reservation.event_id)
+            if event is not None:
+                event_created_at = event.created_at
+                if requested_ggb <= 0:
+                    requested_ggb = max(0, int(event.requested_ggb or 0))
+                if member_reserved_ggb + regular_reserved_ggb <= 0:
+                    member_reserved_ggb = max(0, int(event.member_reserved_ggb or 0))
+                    regular_reserved_ggb = max(0, int(event.regular_reserved_ggb or 0))
+                if member_reserved + regular_reserved <= 0:
                     member_reserved = max(0, int(event.member_reserved_count or 0))
                     regular_reserved = max(0, int(event.regular_reserved_count or 0))
-                    membership_source_redeem_code_id = clean_string(event.membership_source_redeem_code_id)
-                    membership_activation_key = clean_string(event.membership_activation_key)
+                membership_source_redeem_code_id = clean_string(event.membership_source_redeem_code_id)
+                membership_activation_key = clean_string(event.membership_activation_key)
+            if requested_ggb <= 0:
+                requested_ggb = max(0, int(reservation.requested_count or 0)) * IMAGE_COST_GGB
+            if member_reserved_ggb + regular_reserved_ggb <= 0:
+                member_reserved_ggb = member_reserved * IMAGE_COST_GGB
+                regular_reserved_ggb = regular_reserved * IMAGE_COST_GGB
             if member_reserved + regular_reserved <= 0:
                 regular_reserved = max(0, int(reservation.requested_count or 0))
-            member_actual = min(member_reserved, actual)
-            regular_actual = min(regular_reserved, max(0, actual - member_actual))
-            member_refund = max(0, member_reserved - member_actual)
-            regular_refund = max(0, regular_reserved - regular_actual)
-            refund = member_refund + regular_refund
+            if member_reserved_ggb + regular_reserved_ggb <= 0:
+                regular_reserved_ggb = max(0, int(reservation.requested_count or 0)) * IMAGE_COST_GGB
+            member_actual_ggb = min(member_reserved_ggb, actual_ggb)
+            regular_actual_ggb = min(regular_reserved_ggb, max(0, actual_ggb - member_actual_ggb))
+            member_refund_ggb = max(0, member_reserved_ggb - member_actual_ggb)
+            regular_refund_ggb = max(0, regular_reserved_ggb - regular_actual_ggb)
+            refund_ggb = member_refund_ggb + regular_refund_ggb
+            member_actual = member_actual_ggb // IMAGE_COST_GGB
+            regular_actual = regular_actual_ggb // IMAGE_COST_GGB
+            member_refund = member_refund_ggb // IMAGE_COST_GGB
+            regular_refund = regular_refund_ggb // IMAGE_COST_GGB
+            refund = max(0, int(reservation.requested_count or 0) - actual)
             event_result = session.execute(
                 update(ImageUsageEventModel)
                 .where(
@@ -2188,6 +2455,12 @@ class UserService:
                     regular_actual_count=regular_actual,
                     member_refunded_count=member_refund,
                     regular_refunded_count=regular_refund,
+                    actual_ggb=actual_ggb,
+                    refunded_ggb=refund_ggb,
+                    member_actual_ggb=member_actual_ggb,
+                    regular_actual_ggb=regular_actual_ggb,
+                    member_refunded_ggb=member_refund_ggb,
+                    regular_refunded_ggb=regular_refund_ggb,
                     status="success" if success else "failed",
                     error=clean_string(error),
                     settled_at=now,
@@ -2197,29 +2470,26 @@ class UserService:
                 session.rollback()
                 return
 
-            if member_refund:
+            if member_refund_ggb:
                 membership = (
                     session.query(UserMembershipModel)
                     .filter(UserMembershipModel.user_id == reservation.user_id)
                     .one_or_none()
                 )
                 if membership is not None:
-                    current_source = clean_string(membership.source_redeem_code_id)
-                    current_activation_key = self._membership_activation_key(membership)
-                    same_activation = bool(membership_activation_key) and current_activation_key == membership_activation_key
-                    legacy_same_source = (
-                        not membership_activation_key
-                        and bool(membership_source_redeem_code_id)
-                        and current_source == membership_source_redeem_code_id
-                    )
-                    if same_activation or legacy_same_source:
-                        membership.member_image_quota = int(membership.member_image_quota or 0) + member_refund
+                    if self._membership_refund_matches(
+                        membership,
+                        activation_key=membership_activation_key,
+                        source_redeem_code_id=membership_source_redeem_code_id,
+                        event_created_at=event_created_at,
+                    ):
+                        membership.member_image_quota = int(membership.member_image_quota or 0) + member_refund_ggb
                         membership.updated_at = now
             user_result = session.execute(
                 update(UserModel)
                 .where(UserModel.id == reservation.user_id)
                 .values(
-                    image_quota=UserModel.image_quota + regular_refund,
+                    image_quota=UserModel.image_quota + regular_refund_ggb,
                     active_image_requests=case(
                         (UserModel.active_image_requests > 0, UserModel.active_image_requests - 1),
                         else_=0,
@@ -2249,9 +2519,17 @@ class UserService:
             for event in events:
                 member_reserved = max(0, int(event.member_reserved_count or 0))
                 regular_reserved = max(0, int(event.regular_reserved_count or 0))
+                member_reserved_ggb = max(0, int(event.member_reserved_ggb or 0))
+                regular_reserved_ggb = max(0, int(event.regular_reserved_ggb or 0))
+                if member_reserved_ggb + regular_reserved_ggb <= 0:
+                    member_reserved_ggb = member_reserved * IMAGE_COST_GGB
+                    regular_reserved_ggb = regular_reserved * IMAGE_COST_GGB
                 if member_reserved + regular_reserved <= 0:
                     regular_reserved = max(0, int(event.requested_count or 0))
-                refund = member_reserved + regular_reserved
+                if member_reserved_ggb + regular_reserved_ggb <= 0:
+                    regular_reserved_ggb = regular_reserved * IMAGE_COST_GGB
+                refund = max(0, int(event.requested_count or 0)) or (member_reserved + regular_reserved)
+                refund_ggb = member_reserved_ggb + regular_reserved_ggb
                 now = utc_now()
                 event_result = session.execute(
                     update(ImageUsageEventModel)
@@ -2266,40 +2544,41 @@ class UserService:
                         regular_actual_count=0,
                         member_refunded_count=member_reserved,
                         regular_refunded_count=regular_reserved,
+                        actual_ggb=0,
+                        refunded_ggb=refund_ggb,
+                        member_actual_ggb=0,
+                        regular_actual_ggb=0,
+                        member_refunded_ggb=member_reserved_ggb,
+                        regular_refunded_ggb=regular_reserved_ggb,
                         status="recovered",
-                        error="recovered stale reserved image quota",
+                        error="recovered stale reserved GGB",
                         settled_at=now,
                     )
                 )
                 if event_result.rowcount != 1:
                     continue
 
-                if member_reserved:
+                if member_reserved_ggb:
                     membership = (
                         session.query(UserMembershipModel)
                         .filter(UserMembershipModel.user_id == event.user_id)
                         .one_or_none()
                     )
                     if membership is not None:
-                        current_source = clean_string(membership.source_redeem_code_id)
-                        current_activation_key = self._membership_activation_key(membership)
-                        event_activation_key = clean_string(event.membership_activation_key)
-                        event_source = clean_string(event.membership_source_redeem_code_id)
-                        same_activation = bool(event_activation_key) and current_activation_key == event_activation_key
-                        legacy_same_source = (
-                            not event_activation_key
-                            and bool(event_source)
-                            and current_source == event_source
-                        )
-                        if same_activation or legacy_same_source:
-                            membership.member_image_quota = int(membership.member_image_quota or 0) + member_reserved
+                        if self._membership_refund_matches(
+                            membership,
+                            activation_key=clean_string(event.membership_activation_key),
+                            source_redeem_code_id=clean_string(event.membership_source_redeem_code_id),
+                            event_created_at=event.created_at,
+                        ):
+                            membership.member_image_quota = int(membership.member_image_quota or 0) + member_reserved_ggb
                             membership.updated_at = now
 
                 user_result = session.execute(
                     update(UserModel)
                     .where(UserModel.id == event.user_id)
                     .values(
-                        image_quota=UserModel.image_quota + regular_reserved,
+                        image_quota=UserModel.image_quota + regular_reserved_ggb,
                         active_image_requests=case(
                             (UserModel.active_image_requests > 0, UserModel.active_image_requests - 1),
                             else_=0,

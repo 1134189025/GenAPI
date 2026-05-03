@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fetchMe, fetchRedeemHistory, redeemCode, type ManagedUser, type RedeemCode } from "@/lib/api";
+import { formatQuotaAsGgb } from "@/lib/ggb";
 import { cn } from "@/lib/utils";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
@@ -18,7 +19,7 @@ type RedeemFeedback = {
 };
 
 function typeLabel(type: string) {
-  if (type === "image_quota") return "图片额度";
+  if (type === "image_quota") return "GGB 余额";
   if (type === "concurrency") return "图片并发";
   if (type === "membership") return "会员兑换";
   return "邀请码";
@@ -26,7 +27,7 @@ function typeLabel(type: string) {
 
 function quotaLabel(user: ManagedUser | null) {
   if (!user) return "—";
-  return user.role === "admin" ? "不限" : String(user.image_quota ?? 0);
+  return user.role === "admin" ? "不限" : formatQuotaAsGgb(user.total_image_quota ?? user.image_quota ?? 0);
 }
 
 function concurrencyLabel(user: ManagedUser | null) {
@@ -99,11 +100,16 @@ export default function RedeemPage() {
       setCode("");
       const history = await fetchRedeemHistory();
       setItems(history.items);
-      const rewardLabel = data.redeem.type === "membership" ? "会员套餐已激活" : `${typeLabel(data.redeem.type)} +${data.redeem.value}`;
+      const rewardLabel =
+        data.redeem.type === "membership"
+          ? "会员套餐已激活"
+          : data.redeem.type === "image_quota"
+            ? `${typeLabel(data.redeem.type)} +${formatQuotaAsGgb(data.redeem.value)}`
+            : `${typeLabel(data.redeem.type)} +${data.redeem.value}`;
       setFeedback({
         type: "success",
         title: "兑换成功",
-        message: `${rewardLabel} 已到账。当前图片额度 ${quotaLabel(data.user)}，图片并发 ${concurrencyLabel(data.user)}。`,
+        message: `${rewardLabel} 已到账。当前 GGB 余额 ${quotaLabel(data.user)}，图片并发 ${concurrencyLabel(data.user)}。`,
       });
       toast.success("兑换成功");
     } catch (error) {
@@ -132,9 +138,9 @@ export default function RedeemPage() {
               <Gift className="size-3.5" />
               Redeem Center
             </div>
-            <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换图片额度与并发能力</h1>
+            <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换 GGB 余额与并发能力</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。图片额度码、并发码和会员兑换码可在这里使用，邀请码仍仅用于注册流程。
+              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。GGB 余额码、并发码和会员兑换码可在这里使用，邀请码仍仅用于注册流程。
             </p>
           </div>
           <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-4 lg:w-[360px]">
@@ -171,7 +177,7 @@ export default function RedeemPage() {
         <div className="border-b border-slate-200/70 p-5 sm:p-6">
           <div className="text-[11px] font-black uppercase tracking-[0.22em] text-teal-600">Redeem Form</div>
           <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">输入兑换码</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500">兑换码会去除首尾空格后提交，成功后会刷新额度和并发。</p>
+          <p className="mt-1 text-sm leading-6 text-slate-500">兑换码会去除首尾空格后提交，成功后会刷新 GGB 余额和并发。</p>
         </div>
 
         <div className="space-y-5 p-5 sm:p-6">
@@ -198,16 +204,16 @@ export default function RedeemPage() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
-            <RedeemHint title="图片额度码" description="增加可用图片请求额度。" tone="teal" />
+            <RedeemHint title="GGB 余额码" description="增加可用 GGB 余额。" tone="teal" />
             <RedeemHint title="并发码" description="提升同时处理图片请求能力。" tone="amber" />
-            <RedeemHint title="会员兑换码" description="激活会员套餐和周期额度。" tone="blue" />
+            <RedeemHint title="会员兑换码" description="激活会员套餐和周期 GGB。" tone="blue" />
           </div>
         </div>
       </section>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <RedeemStatCard
-          label="图片额度"
+          label="GGB 余额"
           value={isLoading ? "加载中..." : quotaLabel(user)}
           helper="可用于生成或编辑图片"
           icon={<Sparkles className="size-5" />}
@@ -367,7 +373,9 @@ function RedeemHistoryItem({ item }: { item: RedeemCode }) {
         <Badge variant="secondary" className={cn("rounded-full px-3 py-1 font-bold", typeTone)}>
           {typeLabel(item.type)}
         </Badge>
-        <span className="rounded-full bg-slate-950 px-3 py-1 text-sm font-black text-white">+{item.value}</span>
+        <span className="rounded-full bg-slate-950 px-3 py-1 text-sm font-black text-white">
+          {item.type === "image_quota" ? `+${formatQuotaAsGgb(item.value)}` : `+${item.value}`}
+        </span>
       </div>
     </article>
   );

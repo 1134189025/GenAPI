@@ -37,6 +37,8 @@ class AuthSettingsUpdateRequest(BaseModel):
 
 
 class AdminUserCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     email: str
     password: str
     role: str = "user"
@@ -46,6 +48,8 @@ class AdminUserCreateRequest(BaseModel):
 
 
 class AdminUserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     email: str | None = None
     password: str | None = None
     role: str | None = None
@@ -55,6 +59,8 @@ class AdminUserUpdateRequest(BaseModel):
 
 
 class RedeemCodeGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: str
     value: int = 0
     membership_plan_id: str = ""
@@ -72,6 +78,8 @@ class RedeemRequest(BaseModel):
 
 
 class MembershipPlanCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     name: str
     description: str = ""
     duration_days: int = 1
@@ -82,6 +90,8 @@ class MembershipPlanCreateRequest(BaseModel):
 
 
 class MembershipPlanUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     name: str | None = None
     description: str | None = None
     duration_days: int | None = None
@@ -92,6 +102,8 @@ class MembershipPlanUpdateRequest(BaseModel):
 
 
 class PromoCodeCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     code: str
     image_quota: int = 0
     max_uses: int = 1
@@ -100,6 +112,8 @@ class PromoCodeCreateRequest(BaseModel):
 
 
 class PromoCodeUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     image_quota: int | None = None
     max_uses: int | None = None
     expires_at: str | None = None
@@ -111,6 +125,25 @@ def raise_user_error(exc: UserServiceError) -> None:
         status_code=exc.status_code,
         detail={"error": {"message": exc.message, "code": exc.code}},
     ) from exc
+
+
+def request_payload(body: BaseModel, *, exclude_unset: bool = False) -> dict[str, object]:
+    payload = body.model_dump(mode="python", exclude_unset=exclude_unset)
+    extra = getattr(body, "model_extra", None)
+    if isinstance(extra, dict):
+        payload.update(extra)
+    return payload
+
+
+def payload_int(payload: dict[str, object], keys: tuple[str, ...], default: int = 0, *, minimum: int = 0) -> int:
+    for key in keys:
+        if key not in payload:
+            continue
+        try:
+            return max(minimum, int(payload.get(key) or 0))
+        except (TypeError, ValueError):
+            return max(minimum, default)
+    return max(minimum, default)
 
 
 def auth_payload(result: dict[str, object], app_version: str) -> dict[str, object]:
@@ -260,12 +293,17 @@ def create_router(app_version: str) -> APIRouter:
     async def create_user(body: AdminUserCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         try:
+            payload = request_payload(body, exclude_unset=True)
             item = user_service.create_user(
                 email=body.email,
                 password=body.password,
                 role="admin" if body.role == "admin" else "user",
                 enabled=body.enabled,
-                image_quota=body.image_quota,
+                image_quota=payload_int(
+                    payload,
+                    ("image_quota", "ggb", "ggb_balance", "regular_ggb", "regular_ggb_balance"),
+                    body.image_quota,
+                ),
                 image_concurrency=body.image_concurrency,
             )
             return {"item": item, "items": user_service.list_users()}
@@ -277,7 +315,7 @@ def create_router(app_version: str) -> APIRouter:
         identity = require_admin(authorization)
         try:
             normalized_user_id = clean_string(user_id)
-            updates = body.model_dump(mode="python", exclude_unset=True)
+            updates = request_payload(body, exclude_unset=True)
             reject_self_admin_status_change(actor=identity, target_user_id=normalized_user_id, updates=updates)
             item = user_service.update_user(normalized_user_id, updates)
             return {"item": item, "items": user_service.list_users()}
@@ -307,7 +345,7 @@ def create_router(app_version: str) -> APIRouter:
     ):
         require_admin(authorization)
         try:
-            item = user_service.create_membership_plan(body.model_dump(mode="python"))
+            item = user_service.create_membership_plan(request_payload(body, exclude_unset=True))
             return {"item": item, "items": user_service.list_membership_plans()}
         except UserServiceError as exc:
             raise_user_error(exc)
@@ -320,7 +358,7 @@ def create_router(app_version: str) -> APIRouter:
     ):
         require_admin(authorization)
         try:
-            item = user_service.update_membership_plan(plan_id, body.model_dump(mode="python", exclude_unset=True))
+            item = user_service.update_membership_plan(plan_id, request_payload(body, exclude_unset=True))
             return {"item": item, "items": user_service.list_membership_plans()}
         except UserServiceError as exc:
             raise_user_error(exc)
@@ -338,9 +376,13 @@ def create_router(app_version: str) -> APIRouter:
     async def generate_redeem_codes(body: RedeemCodeGenerateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         try:
+            payload = request_payload(body, exclude_unset=True)
+            value_keys = ("value",)
+            if body.type == "image_quota":
+                value_keys = ("value", "ggb", "ggb_value")
             codes = user_service.generate_redeem_codes(
                 type=body.type,  # type: ignore[arg-type]
-                value=body.value,
+                value=payload_int(payload, value_keys, body.value),
                 count=body.count,
                 expires_at=parse_optional_datetime(body.expires_at),
                 membership_plan_id=body.membership_plan_id,
@@ -398,9 +440,10 @@ def create_router(app_version: str) -> APIRouter:
     async def create_promo_code(body: PromoCodeCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         try:
+            payload = request_payload(body, exclude_unset=True)
             item = user_service.create_promo_code(
                 code=body.code,
-                image_quota=body.image_quota,
+                image_quota=payload_int(payload, ("image_quota", "ggb", "ggb_amount", "ggb_value"), body.image_quota),
                 max_uses=body.max_uses,
                 expires_at=parse_optional_datetime(body.expires_at),
                 enabled=body.enabled,
@@ -417,7 +460,7 @@ def create_router(app_version: str) -> APIRouter:
     ):
         require_admin(authorization)
         try:
-            item = user_service.update_promo_code(code_id, body.model_dump(mode="python", exclude_unset=True))
+            item = user_service.update_promo_code(code_id, request_payload(body, exclude_unset=True))
             return {"item": item, "items": user_service.list_promo_codes()}
         except UserServiceError as exc:
             raise_user_error(exc)

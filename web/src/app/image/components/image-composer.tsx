@@ -7,6 +7,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { formatImageCostGgb } from "@/lib/ggb";
 import { cn } from "@/lib/utils";
 import type { ImageConversationMode } from "@/store/image-conversations";
 
@@ -16,6 +17,9 @@ type ImageComposerProps = {
   imageCount: string;
   imageSize: string;
   availableQuota: string;
+  availableQuotaLabel: string;
+  estimatedUsageLabel?: string;
+  estimatedUsageValue?: string;
   activeTaskCount: number;
   referenceImages: Array<{ name: string; dataUrl: string }>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -46,6 +50,9 @@ export function ImageComposer({
   imageCount,
   imageSize,
   availableQuota,
+  availableQuotaLabel,
+  estimatedUsageLabel = "预计消耗",
+  estimatedUsageValue,
   activeTaskCount,
   referenceImages,
   textareaRef,
@@ -70,6 +77,7 @@ export function ImageComposer({
     [referenceImages],
   );
   const imageSizeLabel = imageSizeOptions.find((option) => option.value === imageSize)?.label || "未指定";
+  const estimatedUsage = estimatedUsageValue || formatImageCostGgb(imageCount);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -315,14 +323,17 @@ export function ImageComposer({
               {isMoreSettingsOpen ? (
                 <div className="mt-2 grid gap-1.5 rounded-2xl bg-stone-50 px-3 py-2 text-[11px] leading-5 text-stone-600 sm:mt-3 sm:grid-cols-3 sm:gap-2 sm:rounded-3xl sm:px-4 sm:py-3 sm:text-xs">
                   <div>
-                    <span className="font-medium text-stone-900">额度</span>
+                    <span className="font-medium text-stone-900">{availableQuotaLabel}</span>
                     <span className="ml-2">{availableQuota}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-stone-900">{estimatedUsageLabel}</span>
+                    <span className="ml-2">{estimatedUsage}</span>
                   </div>
                   <div>
                     <span className="font-medium text-stone-900">任务</span>
                     <span className="ml-2">{activeTaskCount > 0 ? `${activeTaskCount} 个处理中` : "空闲"}</span>
                   </div>
-                  <div className="text-stone-500">可直接粘贴图片，系统会自动切到图生图。</div>
                 </div>
               ) : null}
             </div>

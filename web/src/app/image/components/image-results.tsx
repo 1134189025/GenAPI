@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Clock3, Download, LoaderCircle, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { normalizeQuotaErrorMessage } from "@/lib/ggb";
 import { cn } from "@/lib/utils";
 import type {
   ImageConversation,
@@ -232,7 +233,7 @@ export function ImageResults({
                           )}
                         >
                           <div className="flex h-full items-center justify-center px-6 py-8 text-center text-sm leading-6 text-rose-600">
-                            {image.error || "生成失败"}
+                            {normalizeQuotaErrorMessage(image.error, "生成失败")}
                           </div>
                         </div>
                       );
@@ -263,7 +264,7 @@ export function ImageResults({
 
                 {turn.status === "error" && turn.error ? (
                   <div className="mt-4 rounded-2xl bg-amber-50/90 px-4 py-3 text-sm leading-6 text-amber-700">
-                    {turn.error}
+                    {normalizeQuotaErrorMessage(turn.error)}
                   </div>
                 ) : null}
               </div>

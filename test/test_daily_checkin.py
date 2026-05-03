@@ -103,6 +103,11 @@ class DailyCheckinTests(unittest.TestCase):
                 .all()
             )
 
+    def assert_user_ggb(self, user: dict[str, object], expected_ggb: int) -> None:
+        self.assertIn("ggb", user)
+        self.assertEqual(user["ggb"], expected_ggb)
+        self.assertEqual(user["image_quota"], expected_ggb)
+
     def test_defaults_and_daily_checkins_table_are_created_in_users_db(self) -> None:
         admin_token = self.create_admin()
 
@@ -110,10 +115,10 @@ class DailyCheckinTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         settings = response.json()["settings"]
         self.assertEqual(settings["checkin_enabled"], True)
-        self.assertEqual(settings["checkin_daily_image_quota"], 1)
+        self.assertEqual(settings["checkin_daily_image_quota"], 5)
         self.assertEqual(settings["checkin_streak_bonus_enabled"], True)
         self.assertEqual(settings["checkin_streak_bonus_days"], 7)
-        self.assertEqual(settings["checkin_streak_bonus_image_quota"], 3)
+        self.assertEqual(settings["checkin_streak_bonus_image_quota"], 15)
         self.assertEqual(settings["checkin_timezone"], "Asia/Shanghai")
 
         inspector = inspect(self.user_service.engine)
@@ -145,21 +150,45 @@ class DailyCheckinTests(unittest.TestCase):
             self.assertEqual(checked_in.status_code, 200, checked_in.text)
             payload = checked_in.json()
             self.assertEqual(payload["already_checked_in"], False)
-            self.assertEqual(payload["reward_image_quota"], 1)
+            self.assertEqual(payload["reward_image_quota"], 5)
             self.assertEqual(payload["streak_days"], 1)
             self.assertEqual(payload["checkin_date"], "2026-05-01")
-            self.assertEqual(payload["user"]["image_quota"], 3)
+            self.assertEqual(payload["user"]["image_quota"], 7)
 
             status_after = self.client.get("/api/checkin/status", headers=headers)
             self.assertEqual(status_after.status_code, 200, status_after.text)
             self.assertEqual(status_after.json()["checked_in_today"], True)
             self.assertEqual(status_after.json()["streak_days"], 1)
-            self.assertEqual(status_after.json()["reward_image_quota"], 1)
+            self.assertEqual(status_after.json()["reward_image_quota"], 5)
             self.assertEqual(status_after.json()["can_checkin"], False)
 
         rows = self.checkin_rows(user_id)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].reward_image_quota, 1)
+        self.assertEqual(rows[0].reward_image_quota, 5)
+
+    def test_checkin_awards_ggb_and_keeps_legacy_reward_field_consistent(self) -> None:
+        admin_token = self.create_admin()
+        _, headers = self.create_user(admin_token, image_quota=0)
+        updated_settings = self.client.patch(
+            "/api/admin/auth-settings",
+            headers=self.auth_headers(admin_token),
+            json={
+                "checkin_daily_image_quota": 7,
+                "checkin_streak_bonus_enabled": False,
+            },
+        )
+        self.assertEqual(updated_settings.status_code, 200, updated_settings.text)
+        now = self.local_noon_utc(2026, 5, 6)
+
+        with patch("services.user_service.utc_now", return_value=now):
+            checked_in = self.client.post("/api/checkin", headers=headers)
+
+        self.assertEqual(checked_in.status_code, 200, checked_in.text)
+        payload = checked_in.json()
+        self.assertIn("reward_ggb", payload)
+        self.assertEqual(payload["reward_ggb"], 7)
+        self.assertEqual(payload["reward_image_quota"], 7)
+        self.assert_user_ggb(payload["user"], 7)
 
     def test_same_day_repeat_is_idempotent_and_does_not_award_again(self) -> None:
         admin_token = self.create_admin()
@@ -175,7 +204,7 @@ class DailyCheckinTests(unittest.TestCase):
         self.assertEqual(first.json()["already_checked_in"], False)
         self.assertEqual(second.json()["already_checked_in"], True)
         self.assertEqual(second.json()["reward_image_quota"], 0)
-        self.assertEqual(second.json()["user"]["image_quota"], 1)
+        self.assertEqual(second.json()["user"]["image_quota"], 5)
         self.assertEqual(len(self.checkin_rows(user_id)), 1)
 
     def test_cross_day_checkins_continue_streak_and_seventh_day_gets_bonus(self) -> None:
@@ -188,14 +217,14 @@ class DailyCheckinTests(unittest.TestCase):
                 response = self.client.post("/api/checkin", headers=headers)
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["streak_days"], offset + 1)
-            expected_reward = 4 if offset == 6 else 1
+            expected_reward = 20 if offset == 6 else 5
             self.assertEqual(response.json()["reward_image_quota"], expected_reward)
 
-        self.assertEqual(self.user_service.get_user(user_id)["image_quota"], 10)
+        self.assertEqual(self.user_service.get_user(user_id)["image_quota"], 50)
         rows = self.checkin_rows(user_id)
         self.assertEqual(len(rows), 7)
         self.assertEqual(rows[-1].streak_days, 7)
-        self.assertEqual(rows[-1].reward_image_quota, 4)
+        self.assertEqual(rows[-1].reward_image_quota, 20)
 
     def test_checkin_disabled_returns_403_without_awarding_quota(self) -> None:
         admin_token = self.create_admin()
@@ -285,7 +314,7 @@ class DailyCheckinTests(unittest.TestCase):
             response = self.client.post("/api/checkin", headers=headers)
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["user"]["image_quota"], 1)
+        self.assertEqual(response.json()["user"]["image_quota"], 5)
         self.assertEqual(response.json()["user"]["member_image_quota"], 8)
         with self.user_service.Session() as session:
             membership = session.query(self.user_service_module.UserMembershipModel).filter_by(user_id=user_id).one()
@@ -307,7 +336,7 @@ class DailyCheckinTests(unittest.TestCase):
                 results = list(executor.map(lambda _: checkin_once(), range(worker_count)))
 
         self.assertEqual(len(self.checkin_rows(user_id)), 1)
-        self.assertEqual(self.user_service.get_user(user_id)["image_quota"], 1)
+        self.assertEqual(self.user_service.get_user(user_id)["image_quota"], 5)
         self.assertEqual(sum(1 for result in results if result["already_checked_in"] is False), 1)
         self.assertEqual(sum(1 for result in results if result["already_checked_in"] is True), worker_count - 1)
 

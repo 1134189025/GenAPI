@@ -102,6 +102,51 @@ class AccountService:
             return True
         return int(account.get("quota") or 0) > 0
 
+    @staticmethod
+    def _is_problem_account(account: dict) -> bool:
+        if not isinstance(account, dict):
+            return False
+        status = str(account.get("status") or "").strip()
+        if status in {"限流", "异常"}:
+            return True
+        if status == "禁用":
+            return False
+        if bool(account.get("image_quota_unknown")):
+            return False
+        try:
+            quota = int(account.get("quota") or 0)
+        except (TypeError, ValueError):
+            quota = 0
+        return status == "正常" and quota <= 0
+
+    @staticmethod
+    def _is_token_invalid_error_message(message: str) -> bool:
+        text = str(message or "").lower()
+        return (
+            "/backend-api/me failed: http 401" in text
+            or "http 401" in text and "backend-api/me" in text
+            or "status=401" in text
+            or "status 401" in text
+            or "token_invalidated" in text
+            or "token_revoked" in text
+            or "authentication token has been invalidated" in text
+            or "invalidated oauth token" in text
+        )
+
+    @staticmethod
+    def _is_rate_limited_error_message(message: str) -> bool:
+        text = str(message or "").lower()
+        return (
+            "http 429" in text
+            or "status=429" in text
+            or "status 429" in text
+            or "rate limit" in text
+            or "rate_limit" in text
+            or "too many requests" in text
+            or "usage limit" in text
+            or ("image quota" in text and "limit" in text)
+        )
+
     def _decode_access_token_payload(self, access_token: str) -> dict[str, Any]:
         parts = self._clean_token(access_token).split(".")
         if len(parts) < 2:
@@ -296,23 +341,22 @@ class AccountService:
         except Exception as exc:
             message = redact_sensitive_text(str(exc), [access_token])
             print(f"[account-available] refresh token={token_ref} fail {message}")
-            if "/backend-api/me failed: HTTP 401" in message:
-                if self.remove_invalid_token(access_token, "refresh_account_state"):
-                    return None
-                return self.update_account(
-                    access_token,
-                    {
-                        "status": "异常",
-                        "quota": 0,
-                    },
-                )
+            if self._is_token_invalid_error_message(message):
+                return self.mark_invalid_token(access_token, "refresh_account_state")
+            if self._is_rate_limited_error_message(message):
+                return self.mark_rate_limited_token(access_token, "refresh_account_state")
             return None
         return self.update_account(access_token, remote_info)
 
-    def get_available_access_token(self) -> str:
+    def get_available_access_token(self, excluded_tokens: set[str] | None = None) -> str:
         attempted_tokens: set[str] = set()
+        initial_excluded = {
+            self._clean_token(token)
+            for token in (excluded_tokens or set())
+            if self._clean_token(token)
+        }
         while True:
-            access_token = self._pick_next_candidate_token(excluded_tokens=attempted_tokens)
+            access_token = self._pick_next_candidate_token(excluded_tokens=attempted_tokens | initial_excluded)
             attempted_tokens.add(access_token)
             token_ref = anonymize_token(access_token)
             account = self.refresh_account_state(access_token)
@@ -339,6 +383,29 @@ class AccountService:
         if removed:
             log_service.add(LOG_TYPE_ACCOUNT, "自动移除异常账号", {"source": event, "token": anonymize_token(access_token)})
         return removed
+
+    def mark_invalid_token(self, access_token: str, event: str) -> dict | None:
+        if self.remove_invalid_token(access_token, event):
+            return None
+        return self.update_account(
+            access_token,
+            {
+                "status": "异常",
+                "quota": 0,
+                "image_quota_unknown": False,
+            },
+        )
+
+    def mark_rate_limited_token(self, access_token: str, event: str, restore_at: str | None = None) -> dict | None:
+        return self.update_account(
+            access_token,
+            {
+                "status": "限流",
+                "quota": 0,
+                "image_quota_unknown": False,
+                "restore_at": restore_at or None,
+            },
+        )
 
     def next_token(self) -> str:
         return self.get_available_access_token()
@@ -402,6 +469,16 @@ class AccountService:
                 token
                 for item in self._accounts
                 if item.get("status") == "限流"
+                   and (token := self._clean_token(item.get("access_token")))
+            ]
+
+    def list_problem_tokens(self) -> list[str]:
+        with self._lock:
+            self._reload_accounts_locked()
+            return [
+                token
+                for item in self._accounts
+                if self._is_problem_account(item)
                    and (token := self._clean_token(item.get("access_token")))
             ]
 
@@ -617,10 +694,12 @@ class AccountService:
                 except Exception as exc:
                     message = redact_sensitive_text(str(exc), [access_token])
                     print(f"[account-refresh] fail {anonymize_token(access_token)} {message}")
-                    if "/backend-api/me failed: HTTP 401" in message:
-                        if not self.remove_invalid_token(access_token, "refresh_accounts"):
-                            self.update_account(access_token, {"status": "异常", "quota": 0})
+                    if self._is_token_invalid_error_message(message):
+                        self.mark_invalid_token(access_token, "refresh_accounts")
                         message = "检测到封号"
+                    elif self._is_rate_limited_error_message(message):
+                        self.mark_rate_limited_token(access_token, "refresh_accounts")
+                        message = "检测到限流"
                     errors.append({"access_token": anonymize_token(access_token), "token_ref": anonymize_token(access_token), "error": message})
 
         print(f"[account-refresh] done refreshed={refreshed} errors={len(errors)} workers={max_workers}")

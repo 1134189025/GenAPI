@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { editImage, fetchAccounts, fetchMe, generateImage, type Account } from "@/lib/api";
+import { formatImageCostGgb, formatQuotaAsGgb, normalizeQuotaErrorMessage } from "@/lib/ggb";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { AUTH_SESSION_BROADCAST_CHANNEL, getStoredAuthSession } from "@/store/auth";
 import { consumeImageEditHandoff } from "@/store/image-edit-handoff";
@@ -63,8 +64,8 @@ function formatConversationTime(value: string) {
 }
 
 function formatAvailableQuota(accounts: Account[]) {
-  const availableAccounts = accounts.filter((account) => account.status !== "禁用");
-  return String(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
+  const availableAccounts = accounts.filter((account) => account.status === "正常");
+  return `${availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0)} 上游额度`;
 }
 
 function createId() {
@@ -407,7 +408,11 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         const data = await fetchMe();
         const memberQuota = data.user.member_image_quota ?? 0;
         const totalQuota = data.user.total_image_quota ?? data.user.image_quota ?? 0;
-        setAvailableQuota(memberQuota > 0 ? `${totalQuota}（会员 ${memberQuota}）` : String(totalQuota));
+        setAvailableQuota(
+          memberQuota > 0
+            ? `${formatQuotaAsGgb(totalQuota)}（会员 ${formatQuotaAsGgb(memberQuota)}）`
+            : formatQuotaAsGgb(totalQuota),
+        );
       } catch {
         setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
       }
@@ -845,7 +850,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
             if (!(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
               break;
             }
-            const message = error instanceof Error ? error.message : "生成失败";
+            const message = normalizeQuotaErrorMessage(error, "生成失败");
             const failedImage: StoredImage = {
               id: pendingImage.id,
               status: "error",
@@ -913,7 +918,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         if (!(await isCurrentImageQueueOwner())) {
           return;
         }
-        const message = error instanceof Error ? error.message : "生成图片失败";
+        const message = normalizeQuotaErrorMessage(error, "生成图片失败");
         await updateConversation(conversationId, (current) => {
           if (!current) {
             return null;
@@ -1053,7 +1058,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden rounded-full bg-white/85 px-3 py-2 text-xs font-medium text-stone-600 shadow-sm ring-1 ring-stone-200 sm:block">
-              额度 {availableQuota}
+              {isAdmin ? "上游额度" : "GGB 余额"} {availableQuota}
             </div>
             {activeTaskCount > 0 ? (
               <div className="hidden items-center gap-1.5 rounded-full bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 ring-1 ring-amber-100 sm:flex">
@@ -1102,6 +1107,9 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
             imageCount={imageCount}
             imageSize={imageSize}
             availableQuota={availableQuota}
+            availableQuotaLabel={isAdmin ? "上游额度" : "GGB 余额"}
+            estimatedUsageLabel={isAdmin ? "预计生成" : "预计消耗"}
+            estimatedUsageValue={isAdmin ? `${parsedCount} 张` : formatImageCostGgb(imageCount)}
             activeTaskCount={activeTaskCount}
             referenceImages={referenceImages}
             textareaRef={textareaRef}

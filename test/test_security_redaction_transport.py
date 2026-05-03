@@ -63,6 +63,67 @@ class ImageStreamLoggingTests(unittest.TestCase):
         self.assertNotIn(raw_token, str(raised.exception))
 
 
+class ImageStreamTokenRetryTests(unittest.TestCase):
+    def test_invalid_or_rate_limited_image_token_is_marked_and_next_token_is_tried(self) -> None:
+        from services.protocol import conversation
+
+        cases = [
+            ("status=429 usage limit reached", "mark_rate_limited_token"),
+            ("HTTP 401 authentication token has been invalidated", "mark_invalid_token"),
+        ]
+        for error_message, marker_name in cases:
+            with self.subTest(error_message=error_message):
+                bad_token = f"bad-token-{marker_name}"
+                good_token = f"good-token-{marker_name}"
+                excluded_snapshots: list[set[str]] = []
+
+                class FakeBackend:
+                    def __init__(self, access_token: str = "") -> None:
+                        self.access_token = access_token
+
+                def get_token(*, excluded_tokens=None):
+                    excluded = set(excluded_tokens or set())
+                    excluded_snapshots.append(excluded)
+                    return good_token if bad_token in excluded else bad_token
+
+                def fake_stream(backend, request, index, total):
+                    if backend.access_token == bad_token:
+                        raise RuntimeError(error_message)
+                    yield conversation.ImageOutput(
+                        kind="result",
+                        model=request.model,
+                        index=index,
+                        total=total,
+                        data=[{"b64_json": "generated-image"}],
+                    )
+
+                with (
+                    patch.object(conversation.account_service, "get_available_access_token", side_effect=get_token),
+                    patch.object(conversation.account_service, "mark_image_result") as mark_result,
+                    patch.object(conversation.account_service, "mark_invalid_token") as mark_invalid,
+                    patch.object(conversation.account_service, "mark_rate_limited_token") as mark_limited,
+                    patch.object(conversation, "OpenAIBackendAPI", FakeBackend),
+                    patch.object(conversation, "stream_image_outputs", side_effect=fake_stream),
+                    patch.object(conversation.logger, "warning"),
+                ):
+                    outputs = list(
+                        conversation.stream_image_outputs_with_pool(
+                            conversation.ConversationRequest(model="gpt-image-2", prompt="x")
+                        )
+                    )
+
+                self.assertEqual([output.data for output in outputs], [[{"b64_json": "generated-image"}]])
+                self.assertEqual(excluded_snapshots, [set(), {bad_token}])
+                mark_result.assert_any_call(bad_token, False)
+                mark_result.assert_any_call(good_token, True)
+                if marker_name == "mark_rate_limited_token":
+                    mark_limited.assert_called_once_with(bad_token, "image_stream")
+                    mark_invalid.assert_not_called()
+                else:
+                    mark_invalid.assert_called_once_with(bad_token, "image_stream")
+                    mark_limited.assert_not_called()
+
+
 class ProxyErrorRedactionTests(unittest.TestCase):
     def test_proxy_test_error_does_not_return_embedded_credentials(self) -> None:
         from services import proxy_service

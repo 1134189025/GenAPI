@@ -68,8 +68,11 @@ const accountTypeOptions: { label: string; value: AccountType | "all" }[] = [
   { label: "Pro", value: "Pro" },
 ];
 
-const accountStatusOptions: { label: string; value: AccountStatus | "all" }[] = [
+export type AccountStatusFilter = AccountStatus | "all" | "problem";
+
+const accountStatusOptions: { label: string; value: AccountStatusFilter }[] = [
   { label: "全部状态", value: "all" },
+  { label: "问题账号", value: "problem" },
   { label: "正常", value: "正常" },
   { label: "限流", value: "限流" },
   { label: "异常", value: "异常" },
@@ -154,6 +157,61 @@ function formatQuotaSummary(accounts: Account[]) {
   return formatCompact(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
 }
 
+export function isProblemAccount(account: Account) {
+  if (account.status === "禁用") {
+    return false;
+  }
+  if (account.status === "限流" || account.status === "异常") {
+    return true;
+  }
+  return account.status === "正常" && account.imageQuotaUnknown === false && account.quota <= 0;
+}
+
+export function filterAccountsForAccountsPage(
+  accounts: Account[],
+  filters: {
+    query?: string;
+    typeFilter?: AccountType | "all";
+    statusFilter?: AccountStatusFilter;
+  },
+) {
+  const normalizedQuery = (filters.query ?? "").trim().toLowerCase();
+  const typeFilter = filters.typeFilter ?? "all";
+  const statusFilter = filters.statusFilter ?? "all";
+
+  return accounts.filter((account) => {
+    const searchMatched =
+      normalizedQuery.length === 0 || (account.email ?? "").toLowerCase().includes(normalizedQuery);
+    const typeMatched = typeFilter === "all" || account.type === typeFilter;
+    const statusMatched =
+      statusFilter === "all" ||
+      (statusFilter === "problem" ? isProblemAccount(account) : account.status === statusFilter);
+    return searchMatched && typeMatched && statusMatched;
+  });
+}
+
+export function getAccountRefreshRefsForFilter(
+  accounts: Account[],
+  filters: {
+    query?: string;
+    typeFilter?: AccountType | "all";
+    statusFilter?: AccountStatusFilter;
+  },
+) {
+  return getAccountOperationRefs(filterAccountsForAccountsPage(accounts, filters));
+}
+
+export function getProblemAccountRefsForFilter(
+  accounts: Account[],
+  filters: {
+    query?: string;
+    typeFilter?: AccountType | "all";
+    statusFilter?: AccountStatusFilter;
+  },
+) {
+  return getAccountOperationRefs(filterAccountsForAccountsPage(accounts, filters).filter(isProblemAccount));
+}
+
 export function getDisplayAccountReference(account: Account) {
   const tokenRef = String(account.token_ref || "").trim();
   if (tokenRef) return tokenRef;
@@ -217,7 +275,7 @@ function AccountsPageContent() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccountType | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<AccountStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<AccountStatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -257,14 +315,7 @@ function AccountsPageContent() {
   }, []);
 
   const filteredAccounts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return accounts.filter((account) => {
-      const searchMatched =
-        normalizedQuery.length === 0 || (account.email ?? "").toLowerCase().includes(normalizedQuery);
-      const typeMatched = typeFilter === "all" || account.type === typeFilter;
-      const statusMatched = statusFilter === "all" || account.status === statusFilter;
-      return searchMatched && typeMatched && statusMatched;
-    });
+    return filterAccountsForAccountsPage(accounts, { query, statusFilter, typeFilter });
   }, [accounts, query, statusFilter, typeFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredAccounts.length / Number(pageSize)));
@@ -290,9 +341,13 @@ function AccountsPageContent() {
     return getAccountOperationRefs(accounts.filter((item) => selectedSet.has(item.id)));
   }, [accounts, selectedIds]);
 
-  const abnormalAccountRefs = useMemo(() => {
-    return getAccountOperationRefs(accounts.filter((item) => item.status === "异常"));
-  }, [accounts]);
+  const filteredAccountRefs = useMemo(() => {
+    return getAccountOperationRefs(filteredAccounts);
+  }, [filteredAccounts]);
+
+  const problemAccountRefs = useMemo(() => {
+    return getProblemAccountRefsForFilter(accounts, { query, statusFilter, typeFilter });
+  }, [accounts, query, statusFilter, typeFilter]);
 
   const paginationItems = useMemo(() => {
     const items: (number | "...")[] = [];
@@ -428,7 +483,7 @@ function AccountsPageContent() {
       <PageHeader
         eyebrow="Account Pool"
         title="号池管理"
-        description="导入、刷新、筛选和维护 ChatGPT 账号池，集中处理异常账号与图片额度。"
+        description="导入、刷新、筛选和维护 ChatGPT 账号池，集中处理问题账号与图片额度。"
         actions={
           <>
             <Button
@@ -438,7 +493,7 @@ function AccountsPageContent() {
               disabled={isLoading || isRefreshing || isDeleting}
             >
               <RefreshCw className={cn("size-4", isLoading ? "animate-spin" : "")} />
-              刷新
+              重新加载列表
             </Button>
             <Button
               variant="outline"
@@ -447,7 +502,7 @@ function AccountsPageContent() {
               disabled={isLoading || isRefreshing || isDeleting || accounts.length === 0}
             >
               <RefreshCw className={cn("size-4", isRefreshing ? "animate-spin" : "")} />
-              一键刷新所有账号信息和额度
+              远端检测全部账号状态和额度
             </Button>
             <AccountImportDialog
               disabled={isLoading || isRefreshing || isDeleting}
@@ -496,7 +551,7 @@ function AccountsPageContent() {
                 </SelectTrigger>
                 <SelectContent>
                   {accountStatusOptions
-                    .filter((option) => option.value !== "all")
+                    .filter((option) => option.value !== "all" && option.value !== "problem")
                     .map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
@@ -573,7 +628,7 @@ function AccountsPageContent() {
 
       <DataPanel
         title="账户列表"
-        description="按邮箱、账号类型和状态过滤，支持批量刷新、删除异常账号和导出账号引用。"
+        description="按邮箱、账号类型和状态过滤，支持批量刷新、移除问题账号和导出账号引用。"
         toolbar={
           <Badge variant="secondary" className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">
             {filteredAccounts.length} 条
@@ -615,7 +670,7 @@ function AccountsPageContent() {
             <Select
               value={statusFilter}
               onValueChange={(value) => {
-                setStatusFilter(value as AccountStatus | "all");
+                setStatusFilter(value as AccountStatusFilter);
                 setPage(1);
               }}
             >
@@ -654,6 +709,15 @@ function AccountsPageContent() {
                 <Button
                   variant="ghost"
                   className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
+                  onClick={() => void handleRefreshAccounts(filteredAccountRefs)}
+                  disabled={filteredAccountRefs.length === 0 || isRefreshing}
+                >
+                  {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                  刷新筛选结果
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
                   onClick={() => void handleRefreshAccounts(selectedAccountRefs)}
                   disabled={selectedAccountRefs.length === 0 || isRefreshing}
                 >
@@ -663,11 +727,11 @@ function AccountsPageContent() {
                 <Button
                   variant="ghost"
                   className="h-8 rounded-lg px-3 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => void handleDeleteAccounts(abnormalAccountRefs, "移除异常账号")}
-                  disabled={abnormalAccountRefs.length === 0 || isDeleting}
+                  onClick={() => void handleDeleteAccounts(problemAccountRefs, "移除问题账号")}
+                  disabled={problemAccountRefs.length === 0 || isDeleting}
                 >
                   {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                  移除异常账号
+                  移除问题账号
                 </Button>
                 <Button
                   variant="ghost"

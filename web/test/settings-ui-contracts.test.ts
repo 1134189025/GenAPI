@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   confirmSystemUpdateStart,
@@ -9,6 +11,12 @@ import {
 } from "../src/app/settings/components/update-card";
 import { isSub2APIAuthModeChanged, validateSub2APIServerForm } from "../src/app/settings/components/sub2api-connections";
 import type { Sub2APIServer, UpdateStatus } from "../src/lib/api";
+
+const root = join(import.meta.dir, "..");
+
+function source(path: string) {
+  return readFileSync(join(root, path), "utf8");
+}
 
 describe("settings UI helper contracts", () => {
   const passwordServer: Sub2APIServer = {
@@ -171,6 +179,25 @@ describe("settings UI helper contracts", () => {
 
     expect(getUpdateActionHint(dockerStatus)).toContain("同步最新 docker-compose.yml");
     expect(getUpdateActionHint(dockerStatus)).not.toContain("Docker socket is not mounted");
+  });
+
+  test("auth settings display GGB for rewards while keeping legacy quota payload fields", () => {
+    const authSettings = source("src/app/settings/components/auth-settings-card.tsx");
+    const authHelpers = source("src/app/settings/components/auth-settings-helpers.ts");
+
+    expect(authSettings).toContain("每日奖励 GGB");
+    expect(authSettings).toContain("额外奖励 GGB");
+    expect(authSettings).toContain("默认赠送 GGB");
+    expect(authSettings).toContain("默认图片并发");
+    expect(authSettings).toContain("checkin_daily_image_quota");
+    expect(authSettings).toContain("checkin_streak_bonus_image_quota");
+    expect(authSettings).toContain("default_image_quota");
+    expect(authSettings).toContain("default_image_concurrency");
+
+    expect(authHelpers).toContain("checkin_daily_image_quota");
+    expect(authHelpers).toContain("checkin_streak_bonus_image_quota");
+    expect(authHelpers).toContain("default_image_quota");
+    expect(authHelpers).toContain("default_image_concurrency");
   });
 
   test("system update start requires explicit confirmation", () => {

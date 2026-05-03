@@ -35,6 +35,14 @@ class LoadedSettings:
     refresh_account_interval_minute: int
 
 
+def _coerce_refresh_account_interval_minute(value: object, default: int = 5) -> int:
+    try:
+        interval = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        interval = default
+    return max(1, interval)
+
+
 def _configured_config_file() -> Path:
     configured = str(os.getenv("GENAPI_CONFIG_FILE") or os.getenv("CHATGPT2API_CONFIG_FILE") or "").strip()
     return Path(configured).expanduser() if configured else DATA_DIR / "config.json"
@@ -74,10 +82,7 @@ def _load_settings() -> LoadedSettings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     raw_config = _read_effective_config(CONFIG_FILE)
 
-    try:
-        refresh_interval = int(raw_config.get("refresh_account_interval_minute", 5))
-    except (TypeError, ValueError):
-        refresh_interval = 5
+    refresh_interval = _coerce_refresh_account_interval_minute(raw_config.get("refresh_account_interval_minute", 5))
 
     return LoadedSettings(
         refresh_account_interval_minute=refresh_interval,
@@ -103,10 +108,7 @@ class ConfigStore:
 
     @property
     def refresh_account_interval_minute(self) -> int:
-        try:
-            return int(self.data.get("refresh_account_interval_minute", 5))
-        except (TypeError, ValueError):
-            return 5
+        return _coerce_refresh_account_interval_minute(self.data.get("refresh_account_interval_minute", 5))
 
     @property
     def image_retention_days(self) -> int:
@@ -207,6 +209,10 @@ class ConfigStore:
     def update(self, data: dict[str, object]) -> dict[str, object]:
         next_data = dict(self.data)
         next_data.update(dict(data or {}))
+        if "refresh_account_interval_minute" in next_data:
+            next_data["refresh_account_interval_minute"] = _coerce_refresh_account_interval_minute(
+                next_data.get("refresh_account_interval_minute")
+            )
         self.data = next_data
         self._save()
         return self.get()

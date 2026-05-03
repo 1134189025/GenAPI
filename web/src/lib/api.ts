@@ -178,6 +178,13 @@ export type ManagedUser = {
   image_quota: number;
   member_image_quota: number;
   total_image_quota: number;
+  ggb?: number;
+  member_ggb?: number;
+  total_ggb?: number;
+  regular_ggb_balance?: number;
+  member_ggb_balance?: number;
+  total_ggb_balance?: number;
+  image_cost_ggb?: number;
   membership: UserMembership | null;
   membership_status: MembershipStatus;
   membership_plan_id: string | null;
@@ -200,6 +207,10 @@ export type UserMembership = {
   status: MembershipStatus;
   member_image_quota: number;
   period_image_quota: number;
+  member_ggb?: number;
+  period_ggb?: number;
+  member_ggb_balance?: number;
+  period_ggb_quota?: number;
   duration_days: number;
   period_days: number;
   activated_at: string | null;
@@ -257,6 +268,8 @@ export type MembershipPlan = {
   duration_days: number;
   period_days: number;
   period_image_quota: number;
+  period_ggb?: number;
+  period_ggb_quota?: number;
   enabled: boolean;
   sort_order: number;
   created_at: string;
@@ -297,6 +310,8 @@ export type RedeemCode = {
   code_preview: string;
   type: RedeemCodeType;
   value: number;
+  ggb?: number;
+  ggb_value?: number;
   membership_plan_id?: string | null;
   enabled: boolean;
   used: boolean;
@@ -311,6 +326,7 @@ export type PromoCode = {
   id: string;
   code_preview: string;
   image_quota: number;
+  ggb_amount?: number;
   max_uses: number;
   used_count: number;
   enabled: boolean;

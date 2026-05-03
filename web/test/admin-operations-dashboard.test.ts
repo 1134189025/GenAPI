@@ -95,7 +95,7 @@ describe("admin operations dashboard pages", () => {
     expect(membershipPage).toContain("兑换中心");
 
     expect(adminPlansPage).toContain("会员套餐管理");
-    expect(adminPlansPage).toContain("周期额度");
+    expect(adminPlansPage).toContain("周期 GGB");
     expect(adminPlansPage).toContain("排序");
     expect(adminPlansPage).toContain('const canLoadAdminData = !isCheckingAuth && session?.role === "admin";');
 
@@ -104,7 +104,32 @@ describe("admin operations dashboard pages", () => {
     expect(adminRedeemCodes).toContain("请选择会员套餐");
     expect(redeemPage).toContain("会员兑换码");
     expect(imagePage).toContain("member_image_quota");
-    expect(usersPage).toContain("会员额度");
+    expect(usersPage).toContain("会员 GGB");
+  });
+
+  test("admin GGB UI keeps old payload fields and non-balance image limits distinct", () => {
+    const usersPage = source("src/app/admin/users/page.tsx");
+    const adminPlansPage = source("src/app/admin/membership-plans/page.tsx");
+    const adminRedeemCodes = source("src/app/admin/redeem-codes/page.tsx");
+    const promoCodesPage = source("src/app/admin/promo-codes/page.tsx");
+    const redeemHelpers = source("src/app/admin/redeem-codes/components/redeem-code-helpers.ts");
+
+    expect(usersPage).toContain("GGB 余额");
+    expect(usersPage).toContain("会员 GGB");
+    expect(usersPage).toContain("图片并发");
+    expect(usersPage).toContain("image_quota:");
+    expect(usersPage).toContain("image_concurrency:");
+
+    expect(adminPlansPage).toContain("周期 GGB");
+    expect(adminPlansPage).toContain("period_image_quota");
+
+    expect(adminRedeemCodes).toContain("GGB 兑换码");
+    expect(adminRedeemCodes).toContain("图片并发");
+    expect(adminRedeemCodes).toContain("type: generateForm.type");
+    expect(redeemHelpers).toContain('return "GGB"');
+
+    expect(promoCodesPage).toContain("赠送 GGB");
+    expect(promoCodesPage).toContain("image_quota:");
   });
 
   test("admin operation pages use shared dashboard primitives", () => {

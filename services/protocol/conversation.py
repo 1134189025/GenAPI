@@ -48,10 +48,28 @@ class ImageGenerationError(Exception):
 def is_token_invalid_error(message: str) -> bool:
     text = str(message or "").lower()
     return (
-        "token_invalidated" in text
+        "http 401" in text
+        or "status=401" in text
+        or "status 401" in text
+        or "token_invalidated" in text
         or "token_revoked" in text
         or "authentication token has been invalidated" in text
         or "invalidated oauth token" in text
+    )
+
+
+def is_rate_limited_error(message: str) -> bool:
+    text = str(message or "").lower()
+    return (
+        "http 429" in text
+        or "status=429" in text
+        or "status 429" in text
+        or "rate limit" in text
+        or "rate_limit" in text
+        or "too many requests" in text
+        or "usage limit" in text
+        or "no available image quota" in text
+        or "image quota" in text and "limit" in text
     )
 
 
@@ -630,13 +648,19 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
     emitted = False
     last_error = ""
     for index in range(1, request.n + 1):
+        attempted_tokens: set[str] = set()
         while True:
             try:
-                token = account_service.get_available_access_token()
+                token = account_service.get_available_access_token(excluded_tokens=attempted_tokens)
             except RuntimeError as exc:
                 if emitted:
                     return
                 raise ImageGenerationError(str(exc) or "image generation failed") from exc
+            if token in attempted_tokens:
+                if emitted:
+                    return
+                raise ImageGenerationError(last_error or "image generation failed")
+            attempted_tokens.add(token)
 
             emitted_for_token = False
             returned_message = False
@@ -672,8 +696,11 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
                     "token_ref": anonymize_token(token),
                     "error": redact_sensitive_text(last_error, [token]),
                 })
-                if not emitted_for_token and is_token_invalid_error(last_error):
-                    account_service.remove_invalid_token(token, "image_stream")
+                if is_token_invalid_error(last_error):
+                    account_service.mark_invalid_token(token, "image_stream")
+                    continue
+                if is_rate_limited_error(last_error):
+                    account_service.mark_rate_limited_token(token, "image_stream")
                     continue
                 raise ImageGenerationError(redact_sensitive_text(last_error, [token]) or "image generation failed") from exc
 

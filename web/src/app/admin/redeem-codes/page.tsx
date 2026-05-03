@@ -230,7 +230,7 @@ export default function AdminRedeemCodesPage() {
       <PageHeader
         eyebrow="Redeem Codes"
         title="兑换码管理"
-        description="生成、筛选和维护图片额度、并发与邀请兑换码。明文兑换码只在生成后展示一次。"
+        description="生成、筛选和维护 GGB 兑换码、图片并发与邀请兑换码。明文兑换码只在生成后展示一次。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading} onClick={() => void load()}>
@@ -278,7 +278,7 @@ export default function AdminRedeemCodesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="image_quota">图片额度</SelectItem>
+                <SelectItem value="image_quota">GGB 兑换码</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
                 <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
@@ -521,7 +521,7 @@ function GenerateRedeemDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="image_quota">图片额度</SelectItem>
+                <SelectItem value="image_quota">GGB 兑换码</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
                 <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
@@ -538,7 +538,7 @@ function GenerateRedeemDialog({
                 <SelectContent>
                   {plans.filter((plan) => plan.enabled).map((plan) => (
                     <SelectItem key={plan.id} value={plan.id}>
-                      {plan.name} / {plan.period_image_quota} 张每 {plan.period_days} 天
+                      {plan.name} / {plan.period_image_quota} GGB 每 {plan.period_days} 天
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -548,7 +548,7 @@ function GenerateRedeemDialog({
           ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>数值</FieldLabel>
+              <FieldLabel>{form.type === "image_quota" ? "GGB 数值" : "数值"}</FieldLabel>
               <Input
                 value={form.value}
                 type="number"

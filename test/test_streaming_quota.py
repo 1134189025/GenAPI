@@ -9,6 +9,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+GGB_PER_IMAGE = 5
+
+
 class StreamingQuotaSettlementTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -44,15 +47,20 @@ class StreamingQuotaSettlementTests(unittest.TestCase):
             os.environ["JWT_SECRET"] = self.old_jwt_secret
         self.tmp.cleanup()
 
+    def assert_user_ggb(self, user: dict[str, object], expected_ggb: int) -> None:
+        self.assertIn("ggb", user)
+        self.assertEqual(user["ggb"], expected_ggb)
+        self.assertEqual(user["image_quota"], expected_ggb)
+
     def test_failed_stream_with_delivered_image_refunds_only_undelivered_quota(self) -> None:
         user = self.user_service.create_user(
             email="stream-partial@example.com",
             password="UserPass123!",
-            image_quota=2,
+            image_quota=2 * GGB_PER_IMAGE,
             image_concurrency=1,
         )
         reservation = self.user_service.reserve_image_quota(user, 2, "/api/image/generations")
-        self.assertEqual(self.user_service.get_user(user["id"])["image_quota"], 0)
+        self.assert_user_ggb(self.user_service.get_user(user["id"]), 0)
         self.assertEqual(self.user_service.get_user(user["id"])["active_image_requests"], 1)
 
         def failing_items():
@@ -72,14 +80,45 @@ class StreamingQuotaSettlementTests(unittest.TestCase):
                 next(stream)
 
         refreshed = self.user_service.get_user(user["id"])
-        self.assertEqual(refreshed["image_quota"], 1)
+        self.assert_user_ggb(refreshed, GGB_PER_IMAGE)
+        self.assertEqual(refreshed["active_image_requests"], 0)
+
+    def test_failed_stream_with_delivered_image_charges_actual_ggb(self) -> None:
+        user = self.user_service.create_user(
+            email="stream-partial-ggb@example.com",
+            password="UserPass123!",
+            image_quota=2 * GGB_PER_IMAGE,
+            image_concurrency=1,
+        )
+        self.assert_user_ggb(user, 2 * GGB_PER_IMAGE)
+        reservation = self.user_service.reserve_image_quota(user, 2, "/api/image/generations")
+        self.assert_user_ggb(self.user_service.get_user(user["id"]), 0)
+
+        def failing_items():
+            yield {"created": 1, "data": [{"b64_json": "generated-image"}]}
+            raise RuntimeError("upstream stream failed")
+
+        call = self.log_service_module.LoggedCall(
+            user,
+            "/api/image/generations",
+            "gpt-image-2",
+            "stream-test",
+        )
+        with patch.object(self.log_service_module.log_service, "add"):
+            stream = call.stream(failing_items(), quota_reservation=reservation)
+            self.assertEqual(next(stream)["data"][0]["b64_json"], "generated-image")
+            with self.assertRaisesRegex(RuntimeError, "upstream stream failed"):
+                next(stream)
+
+        refreshed = self.user_service.get_user(user["id"])
+        self.assert_user_ggb(refreshed, GGB_PER_IMAGE)
         self.assertEqual(refreshed["active_image_requests"], 0)
 
     def test_failed_stream_without_delivered_images_refunds_full_reserved_quota(self) -> None:
         user = self.user_service.create_user(
             email="stream-empty@example.com",
             password="UserPass123!",
-            image_quota=2,
+            image_quota=2 * GGB_PER_IMAGE,
             image_concurrency=1,
         )
         reservation = self.user_service.reserve_image_quota(user, 2, "/api/image/generations")
@@ -100,14 +139,14 @@ class StreamingQuotaSettlementTests(unittest.TestCase):
                 next(stream)
 
         refreshed = self.user_service.get_user(user["id"])
-        self.assertEqual(refreshed["image_quota"], 2)
+        self.assert_user_ggb(refreshed, 2 * GGB_PER_IMAGE)
         self.assertEqual(refreshed["active_image_requests"], 0)
 
     def test_failed_stream_with_progress_url_does_not_charge_image_quota(self) -> None:
         user = self.user_service.create_user(
             email="stream-progress-url@example.com",
             password="UserPass123!",
-            image_quota=2,
+            image_quota=2 * GGB_PER_IMAGE,
             image_concurrency=1,
         )
         reservation = self.user_service.reserve_image_quota(user, 2, "/api/image/generations")
@@ -134,7 +173,7 @@ class StreamingQuotaSettlementTests(unittest.TestCase):
                 next(stream)
 
         refreshed = self.user_service.get_user(user["id"])
-        self.assertEqual(refreshed["image_quota"], 2)
+        self.assert_user_ggb(refreshed, 2 * GGB_PER_IMAGE)
         self.assertEqual(refreshed["active_image_requests"], 0)
 
 
