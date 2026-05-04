@@ -49,7 +49,7 @@ export function AuthShell({
   tone = "teal",
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: ReactNode;
   children: ReactNode;
   brandName?: string;
   eyebrow?: string;
@@ -83,7 +83,7 @@ export function AuthShell({
               {eyebrow || brandName}
             </div>
             <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{title}</h1>
-            <p className="mx-auto mt-3 max-w-[34rem] text-sm leading-6 text-slate-500">{subtitle}</p>
+            {subtitle ? <p className="mx-auto mt-3 max-w-[34rem] text-sm leading-6 text-slate-500">{subtitle}</p> : null}
           </div>
 
           <Card className="overflow-hidden rounded-[2rem] border-white/75 bg-white/85 shadow-[0_32px_110px_-44px_rgba(15,23,42,0.48)] backdrop-blur-2xl">
@@ -96,9 +96,6 @@ export function AuthShell({
             </div>
           ) : null}
 
-          <div className="mt-6 text-center text-xs font-medium text-slate-400">
-            API relay console for {brandName}
-          </div>
         </div>
       </div>
     </div>

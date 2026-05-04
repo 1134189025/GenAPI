@@ -62,4 +62,12 @@ describe("dashboard shell navigation", () => {
     expect(handleLogout.indexOf("await logout")).toBeGreaterThanOrEqual(0);
     expect(handleLogout.indexOf("await logout")).toBeLessThan(handleLogout.indexOf("await clearStoredAuthSession"));
   });
+
+  test("keeps account summary fetching out of the authenticated shell header", () => {
+    const shell = source("src/components/layout/app-shell.tsx");
+    const authenticatedShell = shell.slice(shell.indexOf("const normalizedPath = normalizeDashboardPath(pathname)"));
+
+    expect(shell).not.toContain("./header-user-badge");
+    expect(authenticatedShell).not.toContain("HeaderUserBadge");
+  });
 });

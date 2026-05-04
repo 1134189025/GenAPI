@@ -144,6 +144,40 @@ function countActiveImageRequests(conversations: ImageConversation[]) {
   );
 }
 
+function markAbortedImageQueueRunsFailed(
+  conversations: ImageConversation[],
+  message: string,
+  conversationIds?: string[],
+) {
+  const targetIds = conversationIds ? new Set(conversationIds) : null;
+  const updatedAt = new Date().toISOString();
+
+  return conversations.map((conversation) => {
+    if (targetIds && !targetIds.has(conversation.id)) {
+      return conversation;
+    }
+
+    let changed = false;
+    const turns = conversation.turns.map((turn) => {
+      if (turn.status !== "queued" && turn.status !== "generating") {
+        return turn;
+      }
+
+      changed = true;
+      return {
+        ...turn,
+        status: "error" as const,
+        error: message,
+        images: turn.images.map((image) =>
+          image.status === "loading" ? { ...image, status: "error" as const, error: message } : image,
+        ),
+      };
+    });
+
+    return changed ? { ...conversation, turns, updatedAt } : conversation;
+  });
+}
+
 async function recoverConversationHistory(ownerId: string, items: ImageConversation[]) {
   const latestStoredUpdatedAt = Math.max(
     Date.now(),
@@ -217,6 +251,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
   const didConsumeGalleryHandoffRef = useRef(false);
   const conversationsRef = useRef<ImageConversation[]>([]);
   const activeConversationQueueIdsRef = useRef<Set<string>>(new Set());
+  const imageRequestAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const imageQueueDrainInProgressRef = useRef(false);
   const isImageQueueOwnerActiveRef = useRef(true);
   const imageQueueOwnerSessionKeyRef = useRef(sessionKey);
@@ -267,16 +302,31 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     conversationsRef.current = conversations;
   }, [conversations]);
 
+  const abortImageConversationRequest = useCallback((conversationId: string) => {
+    const controller = imageRequestAbortControllersRef.current.get(conversationId);
+    if (!controller) {
+      return;
+    }
+    controller.abort();
+    imageRequestAbortControllersRef.current.delete(conversationId);
+  }, []);
+
+  const abortAllImageConversationRequests = useCallback(() => {
+    imageRequestAbortControllersRef.current.forEach((controller) => controller.abort());
+    imageRequestAbortControllersRef.current.clear();
+  }, []);
+
   const deactivateImageQueueOwner = useCallback((ownerSessionKey: string) => {
     if (imageQueueOwnerSessionKeyRef.current !== ownerSessionKey) {
       return;
     }
 
+    abortAllImageConversationRequests();
     isImageQueueOwnerActiveRef.current = false;
     activeConversationQueueIdsRef.current.clear();
     activeConversationQueueIdsRef.current = new Set();
     imageQueueDrainInProgressRef.current = false;
-  }, []);
+  }, [abortAllImageConversationRequests]);
 
   const isCurrentImageQueueOwner = useCallback(async () => {
     if (!isImageQueueOwnerActiveRef.current) {
@@ -548,6 +598,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
   };
 
   const handleDeleteConversation = async (id: string) => {
+    abortImageConversationRequest(id);
     const nextConversations = conversations.filter((item) => item.id !== id);
     conversationsRef.current = nextConversations;
     setConversations(nextConversations);
@@ -561,23 +612,37 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
     } catch (error) {
       const message = error instanceof Error ? error.message : "删除会话失败";
       toast.error(message);
-      const items = await listImageConversations(userId);
+      const items = markAbortedImageQueueRunsFailed(
+        await listImageConversations(userId),
+        "删除失败，已取消未完成的图片请求",
+        [id],
+      );
       conversationsRef.current = items;
       setConversations(items);
     }
   };
 
   const handleClearHistory = async () => {
+    const previousConversations = conversationsRef.current;
+    const previousSelectedConversationId = selectedConversationId;
     try {
-      await clearImageConversations(userId);
+      abortAllImageConversationRequests();
       conversationsRef.current = [];
       setConversations([]);
       setSelectedConversationId(null);
       resetComposer();
+      await clearImageConversations(userId);
       toast.success("已清空历史记录");
     } catch (error) {
       const message = error instanceof Error ? error.message : "清空历史记录失败";
       toast.error(message);
+      const restoredConversations = markAbortedImageQueueRunsFailed(
+        previousConversations,
+        "清空失败，已取消未完成的图片请求",
+      );
+      conversationsRef.current = restoredConversations;
+      setConversations(restoredConversations);
+      setSelectedConversationId(previousSelectedConversationId);
     }
   };
 
@@ -709,7 +774,37 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         conversationsRef.current
           .find((conversation) => conversation.id === conversationId)
           ?.turns.find((turn) => turn.id === queuedTurn.id) ?? null;
+      const markCurrentQueuedTurnCancelled = async () => {
+        await updateConversation(
+          conversationId,
+          (current) => {
+            if (!current) {
+              return null;
+            }
 
+            return {
+              ...current,
+              updatedAt: new Date().toISOString(),
+              turns: current.turns.map((turn) =>
+                turn.id === queuedTurn.id && (turn.status === "queued" || turn.status === "generating")
+                  ? {
+                      ...turn,
+                      status: "error",
+                      error: "图片请求已取消",
+                      images: turn.images.map((image) =>
+                        image.status === "loading" ? { ...image, status: "error" as const, error: "图片请求已取消" } : image,
+                      ),
+                    }
+                  : turn,
+              ),
+            };
+          },
+          { persist: false },
+        );
+      };
+
+      const abortController = new AbortController();
+      imageRequestAbortControllersRef.current.set(conversationId, abortController);
       activeConversationQueueIds.add(conversationId);
       try {
         const startedConversation = await updateConversation(conversationId, (current) => {
@@ -784,16 +879,29 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         let resumedFailedCount = 0;
 
         for (const pendingImage of pendingImages) {
-          if (!(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
+          if (abortController.signal.aborted || !(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
             break;
           }
 
           try {
             const data =
               queuedTurn.mode === "edit"
-                ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size, sessionKey)
-                : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size, sessionKey);
-            if (!(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
+                ? await editImage(
+                    referenceFiles,
+                    queuedTurn.prompt,
+                    queuedTurn.model,
+                    queuedTurn.size,
+                    sessionKey,
+                    abortController.signal,
+                  )
+                : await generateImage(
+                    queuedTurn.prompt,
+                    queuedTurn.model,
+                    queuedTurn.size,
+                    sessionKey,
+                    abortController.signal,
+                  );
+            if (abortController.signal.aborted || !(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
               break;
             }
             const first = data.data?.[0];
@@ -847,7 +955,7 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
             resumedSuccessCount += 1;
           } catch (error) {
-            if (!(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
+            if (abortController.signal.aborted || !(await isCurrentImageQueueOwner()) || !getCurrentQueuedTurn()) {
               break;
             }
             const message = normalizeQuotaErrorMessage(error, "生成失败");
@@ -882,6 +990,10 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
 
             resumedFailedCount += 1;
           }
+        }
+        if (abortController.signal.aborted) {
+          await markCurrentQueuedTurnCancelled();
+          return;
         }
         if (!(await isCurrentImageQueueOwner())) {
           return;
@@ -943,6 +1055,9 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         });
         toast.error(message);
       } finally {
+        if (imageRequestAbortControllersRef.current.get(conversationId) === abortController) {
+          imageRequestAbortControllersRef.current.delete(conversationId);
+        }
         activeConversationQueueIds.delete(conversationId);
       }
     },
@@ -1054,7 +1169,6 @@ function ImagePageContent({ isAdmin, userId, sessionKey }: { isAdmin: boolean; u
         <div className="flex shrink-0 items-center justify-between gap-3 py-2 sm:py-3">
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold tracking-tight text-stone-950 sm:text-xl">生成图片</h1>
-            <p className="hidden text-sm text-stone-500 sm:block">描述画面，生成结果，满意后继续编辑。</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden rounded-full bg-white/85 px-3 py-2 text-xs font-medium text-stone-600 shadow-sm ring-1 ring-stone-200 sm:block">

@@ -230,7 +230,7 @@ export default function AdminRedeemCodesPage() {
       <PageHeader
         eyebrow="Redeem Codes"
         title="兑换码管理"
-        description="生成、筛选和维护 GGB 兑换码、图片并发与邀请兑换码。明文兑换码只在生成后展示一次。"
+        description="明文兑换码只在生成后展示一次。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading} onClick={() => void load()}>
@@ -308,7 +308,6 @@ export default function AdminRedeemCodesPage() {
           <div className="p-5">
             <EmptyState
               title="暂无兑换码"
-              description="生成一批兑换码后，这里会展示预览、状态和使用记录。"
               icon={<Ticket className="size-7" />}
               action={
                 <Button className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setIsGenerateOpen(true)}>
@@ -616,7 +615,7 @@ function EditRedeemDialog({
       <DialogContent showCloseButton={!isSubmitting}>
         <DialogHeader>
           <DialogTitle>编辑兑换码</DialogTitle>
-          <DialogDescription>更新启用状态和过期时间。预览码：{codePreview}</DialogDescription>
+          <DialogDescription>预览码：{codePreview}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <Field>

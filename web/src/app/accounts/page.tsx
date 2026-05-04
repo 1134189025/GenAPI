@@ -57,6 +57,16 @@ import {
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
+import {
+  buildAccountReferenceExport,
+  confirmAccountDeletion,
+  filterAccountsForAccountsPage,
+  getAccountRefreshRefsForFilter,
+  getDisplayAccountReference,
+  getProblemAccountRefsForFilter,
+  parseAccountQuotaInput,
+  type AccountStatusFilter,
+} from "./account-page-helpers";
 import { AccountImportDialog } from "./components/account-import-dialog";
 
 const accountTypeOptions: { label: string; value: AccountType | "all" }[] = [
@@ -67,8 +77,6 @@ const accountTypeOptions: { label: string; value: AccountType | "all" }[] = [
   { label: "Team", value: "Team" },
   { label: "Pro", value: "Pro" },
 ];
-
-export type AccountStatusFilter = AccountStatus | "all" | "problem";
 
 const accountStatusOptions: { label: string; value: AccountStatusFilter }[] = [
   { label: "全部状态", value: "all" },
@@ -155,90 +163,6 @@ function formatQuotaSummary(accounts: Account[]) {
     return "未知";
   }
   return formatCompact(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
-}
-
-export function isProblemAccount(account: Account) {
-  if (account.status === "禁用") {
-    return false;
-  }
-  if (account.status === "限流" || account.status === "异常") {
-    return true;
-  }
-  return account.status === "正常" && account.imageQuotaUnknown === false && account.quota <= 0;
-}
-
-export function filterAccountsForAccountsPage(
-  accounts: Account[],
-  filters: {
-    query?: string;
-    typeFilter?: AccountType | "all";
-    statusFilter?: AccountStatusFilter;
-  },
-) {
-  const normalizedQuery = (filters.query ?? "").trim().toLowerCase();
-  const typeFilter = filters.typeFilter ?? "all";
-  const statusFilter = filters.statusFilter ?? "all";
-
-  return accounts.filter((account) => {
-    const searchMatched =
-      normalizedQuery.length === 0 || (account.email ?? "").toLowerCase().includes(normalizedQuery);
-    const typeMatched = typeFilter === "all" || account.type === typeFilter;
-    const statusMatched =
-      statusFilter === "all" ||
-      (statusFilter === "problem" ? isProblemAccount(account) : account.status === statusFilter);
-    return searchMatched && typeMatched && statusMatched;
-  });
-}
-
-export function getAccountRefreshRefsForFilter(
-  accounts: Account[],
-  filters: {
-    query?: string;
-    typeFilter?: AccountType | "all";
-    statusFilter?: AccountStatusFilter;
-  },
-) {
-  return getAccountOperationRefs(filterAccountsForAccountsPage(accounts, filters));
-}
-
-export function getProblemAccountRefsForFilter(
-  accounts: Account[],
-  filters: {
-    query?: string;
-    typeFilter?: AccountType | "all";
-    statusFilter?: AccountStatusFilter;
-  },
-) {
-  return getAccountOperationRefs(filterAccountsForAccountsPage(accounts, filters).filter(isProblemAccount));
-}
-
-export function getDisplayAccountReference(account: Account) {
-  const tokenRef = String(account.token_ref || "").trim();
-  if (tokenRef) return tokenRef;
-  const id = String(account.id || "").trim();
-  return id ? `id:${id}` : "—";
-}
-
-export function buildAccountReferenceExport(accounts: Account[]) {
-  return `${accounts.map(getDisplayAccountReference).filter((item) => item !== "—").join("\n")}\n`;
-}
-
-export function confirmAccountDeletion(
-  refs: AccountOperationRef[],
-  actionLabel: string,
-  confirm: (message: string) => boolean = window.confirm,
-) {
-  if (refs.length === 0) return false;
-  return confirm(`${actionLabel}将删除 ${refs.length} 个账号，此操作不可恢复。确认继续？`);
-}
-
-export function parseAccountQuotaInput(value: string): { ok: true; quota: number } | { ok: false; message: string } {
-  const normalized = value.trim();
-  const quota = Number(normalized || 0);
-  if (!Number.isFinite(quota)) {
-    return { ok: false, message: "额度必须是有效数字" };
-  }
-  return { ok: true, quota };
 }
 
 function downloadAccountReferences(accounts: Account[]) {
@@ -342,8 +266,8 @@ function AccountsPageContent() {
   }, [accounts, selectedIds]);
 
   const filteredAccountRefs = useMemo(() => {
-    return getAccountOperationRefs(filteredAccounts);
-  }, [filteredAccounts]);
+    return getAccountRefreshRefsForFilter(accounts, { query, statusFilter, typeFilter });
+  }, [accounts, query, statusFilter, typeFilter]);
 
   const problemAccountRefs = useMemo(() => {
     return getProblemAccountRefsForFilter(accounts, { query, statusFilter, typeFilter });
@@ -483,7 +407,6 @@ function AccountsPageContent() {
       <PageHeader
         eyebrow="Account Pool"
         title="号池管理"
-        description="导入、刷新、筛选和维护 ChatGPT 账号池，集中处理问题账号与图片额度。"
         actions={
           <>
             <Button
@@ -617,7 +540,7 @@ function AccountsPageContent() {
                 key={item.key}
                 label={item.label}
                 value={typeof value === "number" ? formatCompact(value) : value}
-                hint={item.key === "quota" ? "正常账号可用额度" : "当前号池状态"}
+                hint={item.key === "quota" ? "正常账号可用额度" : undefined}
                 icon={<Icon className="size-5" />}
                 tone={item.tone}
               />
@@ -628,7 +551,6 @@ function AccountsPageContent() {
 
       <DataPanel
         title="账户列表"
-        description="按邮箱、账号类型和状态过滤，支持批量刷新、移除问题账号和导出账号引用。"
         toolbar={
           <Badge variant="secondary" className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">
             {filteredAccounts.length} 条
@@ -692,7 +614,6 @@ function AccountsPageContent() {
           <div className="p-5">
             <EmptyState
               title="正在加载账户"
-              description="从后端同步账号列表和状态。"
               icon={<LoaderCircle className="size-7 animate-spin" />}
             />
           </div>

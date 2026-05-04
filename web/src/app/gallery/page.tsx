@@ -511,9 +511,7 @@ export default function GalleryPage() {
   return (
     <section className="space-y-6">
       <PageHeader
-        eyebrow="Gallery"
         title="图库"
-        description="查看近期生成的图片，下载成品，或把图片带回生图页继续编辑。"
         actions={
           <Button
             variant="outline"

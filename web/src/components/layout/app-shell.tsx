@@ -21,7 +21,6 @@ import {
   X,
 } from "lucide-react";
 
-import webConfig from "@/constants/common-env";
 import { logout } from "@/lib/api";
 import { isAuthSessionChangedError, verifyStoredAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/utils";
@@ -61,7 +60,6 @@ function AppLogo({ compact = false }: { compact?: boolean }) {
       {compact ? null : (
         <span className="min-w-0">
           <span className="block truncate text-base font-black tracking-tight text-slate-950">Genapi</span>
-          <span className="block truncate text-xs font-medium text-slate-400">Image Console</span>
         </span>
       )}
     </Link>
@@ -81,17 +79,17 @@ function SidebarContent({
   const groups = getNavigationGroups(session.role);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-16 items-center border-b border-slate-200/70 px-5">
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-8 flex h-12 items-center px-4">
         <AppLogo />
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <nav className="flex-1 space-y-8 overflow-y-auto px-1">
         {groups.map((group) => (
-          <div key={group.label} className="mb-6">
-            <div className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+          <div key={group.label}>
+            <div className="px-4 pb-3 text-[10px] font-bold uppercase tracking-[0.2em] text-foreground/50">
               {group.label}
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {group.items.map((item) => {
                 const Icon = iconMap[item.icon];
                 const active = normalizedPath === item.href || pathname === item.href;
@@ -101,24 +99,20 @@ function SidebarContent({
                     href={item.href}
                     onClick={onNavigate}
                     className={cn(
-                      "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition",
+                      "group relative flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm font-medium transition-all duration-200",
                       active
-                        ? "bg-teal-50 text-teal-700 shadow-[inset_0_0_0_1px_rgba(20,184,166,0.16)]"
-                        : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-950",
+                        ? "bg-primary/10 text-primary ring-1 ring-primary/10"
+                        : "text-foreground/60 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5",
                     )}
                   >
-                    <span
+                    <Icon
                       className={cn(
-                        "grid size-9 shrink-0 place-items-center rounded-xl transition",
-                        active ? "bg-teal-500 text-white shadow-sm" : "bg-white text-slate-400 group-hover:text-teal-600",
+                        "size-4 transition-transform duration-200 group-hover:scale-110",
+                        active ? "text-primary" : "text-foreground/45 group-hover:text-foreground/70",
                       )}
-                    >
-                      <Icon className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate">{item.label}</span>
-                      <span className="block truncate text-xs font-medium opacity-60">{item.description}</span>
-                    </span>
+                    />
+                    <span className="truncate">{item.label}</span>
+                    {active ? <div className="absolute inset-y-2 left-0 w-1 rounded-full bg-primary" /> : null}
                   </Link>
                 );
               })}
@@ -126,10 +120,13 @@ function SidebarContent({
           </div>
         ))}
       </nav>
-      <div className="border-t border-slate-200/70 p-4 text-xs text-slate-400">
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="font-semibold text-slate-600">{session.role === "admin" ? "管理员" : "普通用户"}</div>
-          <div className="mt-1 truncate">{session.name}</div>
+      <div className="mt-auto pt-4">
+        <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-foreground/50">当前身份</div>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            <div className="truncate text-sm font-semibold text-foreground/80">{session.name}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -226,6 +223,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [isPublic, pathname]);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -239,7 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isPublic || !session) {
     return (
-      <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(240,253,250,0.98),_rgba(248,250,252,0.98)_42%,_rgba(241,245,249,1)_100%)] text-slate-950">
+      <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
         {children}
       </main>
     );
@@ -249,10 +257,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isImageWorkspace = normalizedPath === "/image";
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-950">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(20,184,166,0.13),transparent_28%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.1),transparent_28%),linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:auto,auto,64px_64px,64px_64px]" />
-
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-slate-200/80 bg-white/88 backdrop-blur-xl lg:block">
+    <main className="min-h-screen overflow-x-hidden bg-background text-foreground transition-colors duration-500">
+      <aside className="fixed left-5 top-5 bottom-5 z-40 hidden w-72 glass-panel rounded-[2.5rem] lg:block">
         <SidebarContent session={session} pathname={pathname} />
       </aside>
 
@@ -261,15 +267,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             aria-label="关闭菜单"
-            className="absolute inset-0 bg-slate-950/40"
+            className="absolute inset-0 bg-background/40 backdrop-blur-md"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="relative h-full w-[min(88vw,320px)] border-r border-slate-200 bg-white shadow-2xl">
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="移动端管理菜单"
+            className="relative h-full w-[min(88vw,320px)] border-r border-border bg-card/80 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-2xl"
+          >
             <button
               type="button"
-              className="absolute right-3 top-3 grid size-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-900"
-              onClick={() => setMobileOpen(false)}
               aria-label="关闭菜单"
+              className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] grid size-10 place-items-center rounded-2xl hover:bg-black/5 dark:hover:bg-white/5"
+              onClick={() => setMobileOpen(false)}
             >
               <X className="size-5" />
             </button>
@@ -278,34 +289,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
 
-      <div className="relative flex min-h-screen min-w-0 flex-col overflow-x-hidden lg:pl-72">
-        <header className="sticky top-0 z-30 border-b border-white/70 bg-white/78 backdrop-blur-xl">
-          <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-16 md:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-3">
+      <div className="relative flex min-h-screen flex-col lg:pl-80">
+        <header className="sticky top-0 z-30 px-4 py-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center justify-between gap-3 glass-panel rounded-[2rem] px-4 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               {session.role === "admin" ? (
                 <button
                   type="button"
-                  className="grid size-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm lg:hidden"
-                  onClick={() => setMobileOpen(true)}
                   aria-label="打开菜单"
+                  className="grid size-10 place-items-center rounded-xl bg-black/5 hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 lg:hidden"
+                  onClick={() => setMobileOpen(true)}
                 >
                   <Menu className="size-5" />
                 </button>
               ) : null}
               <div className="min-w-0">
-                <h1 className="truncate text-base font-black tracking-tight text-slate-950 md:text-lg">
+                <h1 className="truncate text-lg font-bold tracking-tight text-foreground md:text-xl">
                   {meta.title}
                 </h1>
-                <p className="hidden truncate text-xs font-medium text-slate-500 md:block">{meta.description}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="hidden rounded-full bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700 sm:inline-flex">
-                v{webConfig.appVersion}
-              </span>
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               <button
                 type="button"
-                className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                aria-label="退出登录"
+                className="flex h-10 items-center gap-2 rounded-2xl bg-foreground/5 px-3 text-sm font-semibold transition-all hover:bg-destructive/10 hover:text-destructive sm:px-4"
                 onClick={() => void handleLogout()}
               >
                 <LogOut className="size-4" />
@@ -317,25 +325,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className={cn(
             "min-w-0 flex-1 px-4 md:px-6 lg:px-8",
-            isImageWorkspace ? "pt-3 pb-0 lg:pt-5 lg:pb-5" : "pt-5",
-            !isImageWorkspace && session.role === "user"
-              ? "pb-[calc(3.75rem+env(safe-area-inset-bottom))] lg:pb-5"
-              : !isImageWorkspace
-                ? "pb-5"
-                : "",
+            isImageWorkspace
+              ? "pt-3 pb-0 lg:pt-5 lg:pb-5"
+              : session.role === "user"
+                ? "pt-4 pb-[calc(3.75rem+env(safe-area-inset-bottom))] lg:pb-8"
+                : "pt-4 pb-8",
           )}
         >
-          <div className="mx-auto min-w-0 max-w-[1540px] animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="mx-auto max-w-[1600px]">
             {children}
           </div>
         </div>
         <button
           type="button"
-          className="fixed bottom-4 right-4 hidden size-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:text-slate-800 lg:grid"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           aria-label="回到顶部"
+          className="fixed bottom-8 right-8 hidden size-12 place-items-center rounded-2xl glass-panel text-foreground/40 transition-all hover:scale-110 hover:text-foreground lg:grid"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
-          <ChevronLeft className="size-4 rotate-90" />
+          <ChevronLeft className="size-5 rotate-90" />
         </button>
         {session.role === "user" ? <MobileUserBottomNavigation pathname={pathname} /> : null}
       </div>

@@ -67,11 +67,11 @@ export function ConfigCard() {
 
   if (isLoadingConfig) {
     return (
-      <DataPanel title="基础运行配置" description="正在读取账号刷新、代理、图片归档和日志配置。">
+      <DataPanel title="基础运行配置" description="正在读取运行配置。">
         <div className="p-5">
           <EmptyState
             title="正在加载系统配置"
-            description="从后端同步当前运行参数。"
+            description="请稍候。"
             icon={<LoaderCircle className="size-7 animate-spin" />}
           />
         </div>
@@ -80,10 +80,10 @@ export function ConfigCard() {
   }
 
   return (
-    <DataPanel title="基础运行配置" description="管理账号刷新、全局代理、图片访问地址、缓存清理和日志级别。">
+    <DataPanel title="基础运行配置" description="账号刷新、代理、图片缓存和日志。">
       <div className="space-y-4 p-6">
         <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-600">
-          管理员登录密钥继续从部署配置读取，不再在此页面展示；如需分发给其他人，请在下方创建普通用户密钥。
+          管理员登录密钥从部署配置读取；普通用户密钥请在用户管理中创建。
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -91,10 +91,10 @@ export function ConfigCard() {
             <Input
               value={String(config?.refresh_account_interval_minute || "")}
               onChange={(event) => setRefreshAccountIntervalMinute(event.target.value)}
-              placeholder="分钟"
+              placeholder="60"
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
-            <p className="text-xs text-stone-500">单位分钟，控制账号自动刷新频率。</p>
+            <p className="text-xs text-stone-500">单位：分钟。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">全局代理</label>
@@ -107,7 +107,7 @@ export function ConfigCard() {
               placeholder="http://127.0.0.1:7890"
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
-            <p className="text-xs text-stone-500">留空表示不使用代理。</p>
+            <p className="text-xs text-stone-500">留空不用代理；格式如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890。</p>
             {proxyTestResult ? (
               <div
                 className={`rounded-xl border px-3 py-2 text-xs leading-6 ${
@@ -142,7 +142,7 @@ export function ConfigCard() {
               placeholder="https://example.com"
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
-            <p className="text-xs text-stone-500">用于生成图片结果的访问前缀地址。</p>
+            <p className="text-xs text-stone-500">图片结果访问前缀。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">图片保留时间</label>
@@ -152,7 +152,7 @@ export function ConfigCard() {
               placeholder="30"
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
-            <p className="text-xs text-stone-500">自动删除多少天前的本地图片。</p>
+            <p className="text-xs text-stone-500">单位：天。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">缓存大小上限</label>
@@ -199,7 +199,7 @@ export function ConfigCard() {
           <div className="space-y-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
             <div>
               <label className="text-sm text-stone-700">控制台日志级别</label>
-              <p className="mt-1 text-xs text-stone-500">不选择时使用默认 info / warning / error。</p>
+              <p className="mt-1 text-xs text-stone-500">默认 info / warning / error。</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {logLevelOptions.map((level) => (

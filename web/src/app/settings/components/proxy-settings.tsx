@@ -112,7 +112,7 @@ export function ProxySettingsCard() {
             <div>
               <h2 className="text-lg font-semibold tracking-tight">上游代理配置</h2>
               <p className="text-sm text-stone-500">
-                为 chatgpt.com 的请求配置出网代理，适合国内服务器部署；Sub2API / CPA 请求不受影响。
+                仅用于 chatgpt.com 请求；Sub2API / CPA 不受影响。
               </p>
             </div>
           </div>
@@ -134,7 +134,7 @@ export function ProxySettingsCard() {
               <div className="space-y-0.5">
                 <div className="text-sm font-medium text-stone-800">启用代理</div>
                 <div className="text-sm text-stone-500">
-                  关闭后 chatgpt.com 请求会直连。保存后立即生效，无需重启。
+                  关闭后 chatgpt.com 请求直连。
                 </div>
               </div>
             </label>
@@ -151,7 +151,7 @@ export function ProxySettingsCard() {
                 className="h-11 rounded-xl border-stone-200 bg-white font-mono text-xs"
               />
               <div className="text-xs text-stone-400">
-                支持 <code className="font-mono">http / https / socks4 / socks5 / socks5h</code>。
+                格式：http://user:pass@host:port 或 socks5://host:port；支持 <code className="font-mono">http / https / socks4 / socks5 / socks5h</code>。
               </div>
             </div>
 

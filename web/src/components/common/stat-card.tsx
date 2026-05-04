@@ -18,22 +18,24 @@ export function StatCard({
   className?: string;
 }) {
   const toneClass = {
-    teal: "bg-teal-50 text-teal-700",
-    blue: "bg-sky-50 text-sky-700",
-    emerald: "bg-emerald-50 text-emerald-700",
-    amber: "bg-amber-50 text-amber-700",
-    rose: "bg-rose-50 text-rose-700",
-    slate: "bg-slate-100 text-slate-700",
+    teal: "bg-primary/5 text-primary",
+    blue: "bg-blue-500/5 text-blue-500",
+    emerald: "bg-emerald-500/5 text-emerald-500",
+    amber: "bg-amber-500/5 text-amber-500",
+    rose: "bg-rose-500/5 text-rose-500",
+    slate: "bg-foreground/5 text-foreground/60",
   }[tone];
 
   return (
-    <div className={cn("rounded-3xl border border-white/75 bg-white/88 p-4 shadow-[0_20px_60px_-34px_rgba(15,23,42,0.35)] backdrop-blur sm:p-5", className)}>
-      <div className="flex items-start gap-4">
-        {icon ? <div className={cn("grid size-12 shrink-0 place-items-center rounded-2xl", toneClass)}>{icon}</div> : null}
+    <div className={cn("apple-card p-5", className)}>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
+          {icon ? <div className={cn("grid size-10 place-items-center rounded-xl transition-colors", toneClass)}>{icon}</div> : null}
+        </div>
         <div className="min-w-0">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
-          <div className="mt-1 break-words text-2xl font-black leading-tight tracking-tight text-slate-950">{value}</div>
-          {hint ? <div className="mt-1 text-xs font-medium text-slate-500">{hint}</div> : null}
+          <div className="break-words text-2xl font-bold tracking-tight text-foreground sm:text-3xl">{value}</div>
+          {hint ? <div className="mt-2 text-xs font-medium text-muted-foreground">{hint}</div> : null}
         </div>
       </div>
     </div>

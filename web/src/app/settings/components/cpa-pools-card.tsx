@@ -22,7 +22,7 @@ export function CPAPoolsCard() {
   return (
     <DataPanel
       title="CPA 连接管理"
-      description="先配置连接，再按需查询远程账号并选择导入到本地号池。"
+      description="连接 CLIProxyAPI 并导入远程账号。"
       toolbar={
         <>
             {pools.length > 0 ? <Badge className="rounded-md px-2.5 py-1">{pools.length} 个连接</Badge> : null}
@@ -38,13 +38,13 @@ export function CPAPoolsCard() {
         {isLoadingPools ? (
           <EmptyState
             title="正在加载 CPA 连接"
-            description="读取系统中已配置的 CLIProxyAPI 连接。"
+            description="请稍候。"
             icon={<LoaderCircle className="size-7 animate-spin" />}
           />
         ) : pools.length === 0 ? (
           <EmptyState
             title="暂无 CPA 连接"
-            description="点击「添加连接」保存你的 CLIProxyAPI 信息。"
+            description="添加 CLIProxyAPI 地址后即可同步。"
             icon={<ServerCog className="size-7" />}
             action={
               <Button className="h-9 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800" onClick={openAddDialog}>
@@ -156,13 +156,7 @@ export function CPAPoolsCard() {
         )}
 
         <div className="rounded-xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-500">
-          <p className="font-medium text-stone-600">使用说明</p>
-          <ul className="mt-1 list-inside list-disc space-y-0.5">
-            <li>页面进入后先读取系统里已配置的 CPA 连接。</li>
-            <li>点击某个连接的「同步」后，会先读取远程账号列表并展示给前端选择。</li>
-            <li>确认选择后，后端后台下载对应 access_token 并导入本地号池。</li>
-            <li>前端只轮询导入进度，不直接参与 download。</li>
-          </ul>
+          同步会读取远程账号列表；确认选择后，后端下载 access_token 并导入本地号池。
         </div>
       </div>
     </DataPanel>

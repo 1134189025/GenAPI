@@ -237,7 +237,7 @@ export default function AdminPromoCodesPage() {
       <PageHeader
         eyebrow="Promo Codes"
         title="优惠码管理"
-        description="创建和维护注册优惠码，用于向新用户赠送 GGB。后端列表只返回 code_preview，因此创建后不会在界面中伪造或恢复完整码。"
+        description="后端列表只返回 code_preview，创建后不会在界面中伪造或恢复完整码。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading} onClick={() => void load()}>
@@ -303,7 +303,6 @@ export default function AdminPromoCodesPage() {
           <div className="p-5">
             <EmptyState
               title="暂无优惠码"
-              description="创建优惠码后，新用户注册可获得 GGB。"
               icon={<Percent className="size-7" />}
               action={
                 <Button className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setIsCreateOpen(true)}>

@@ -423,7 +423,7 @@ export function Sub2APIConnections() {
     <>
       <DataPanel
         title="Sub2API 连接管理"
-        description="配置 Sub2API 服务器后，可查询其中的 OpenAI OAuth 账号并批量导入本地号池。"
+        description="连接 Sub2API 并导入 OpenAI OAuth 账号。"
         toolbar={
           <>
             {servers.length > 0 ? <Badge className="rounded-md px-2.5 py-1">{servers.length} 个连接</Badge> : null}
@@ -442,13 +442,13 @@ export function Sub2APIConnections() {
           {isLoading ? (
             <EmptyState
               title="正在加载 Sub2API 连接"
-              description="读取已保存的服务器和后台导入任务状态。"
+              description="请稍候。"
               icon={<LoaderCircle className="size-7 animate-spin" />}
             />
           ) : servers.length === 0 ? (
             <EmptyState
               title="暂无 Sub2API 连接"
-              description="点击「添加连接」保存你的 Sub2API 信息。"
+              description="添加服务器地址和认证信息后即可同步。"
               icon={<ServerCog className="size-7" />}
               action={
                 <Button
@@ -577,13 +577,7 @@ export function Sub2APIConnections() {
           )}
 
           <div className="rounded-xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-500">
-            <p className="font-medium text-stone-600">使用说明</p>
-            <ul className="mt-1 list-inside list-disc space-y-0.5">
-              <li>输入 Sub2API 地址和管理员账户（或 Admin API Key），保存为一个连接。</li>
-              <li>点击某个连接的「同步」会拉取其中 platform=openai 且 type=oauth 的账号列表。</li>
-              <li>勾选需要的账号后后端会并发拉取 access_token，自动导入本地号池并刷新状态。</li>
-              <li>仅会读取 sub2api 凭据中的 access_token；refresh_token 等字段不会写入本地。</li>
-            </ul>
+            同步仅显示 platform=openai、type=oauth 的账号；导入只写入 access_token，不写入 refresh_token 等字段。
           </div>
         </div>
       </DataPanel>
@@ -593,7 +587,7 @@ export function Sub2APIConnections() {
           <DialogHeader className="gap-2">
             <DialogTitle>{editingServer ? "编辑连接" : "添加连接"}</DialogTitle>
             <DialogDescription className="text-sm leading-6">
-              {editingServer ? "修改 Sub2API 连接信息" : "添加一个新的 Sub2API 连接"}
+              {editingServer ? "修改 Sub2API 连接。" : "支持管理员邮箱 + 密码或 Admin API Key。"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -725,7 +719,7 @@ export function Sub2APIConnections() {
               )}
               {editingServer ? (
                 <div className="flex items-center justify-between gap-2 text-xs text-stone-500">
-                  <span>同步时会用分组 ID 过滤，留空 = 同步所有 OpenAI OAuth 账号。</span>
+                  <span>分组 ID 用于过滤；留空同步所有 OpenAI OAuth 账号。</span>
                   <Button
                     variant="outline"
                     className="h-8 rounded-lg border-stone-200 bg-white px-2 text-xs text-stone-600"
@@ -742,7 +736,7 @@ export function Sub2APIConnections() {
                 </div>
               ) : (
                 <div className="text-xs text-stone-500">
-                  添加完连接后可在编辑对话框里点「拉取分组」选择具体分组。
+                  保存后可在编辑中拉取分组。
                 </div>
               )}
             </div>

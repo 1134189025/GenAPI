@@ -200,12 +200,63 @@ describe("image queue and build safety", () => {
     expect(page).toContain("getStoredAuthSession");
     expect(page).toContain("isCurrentImageQueueOwner");
     expect(page).toContain("sessionKey");
-    expect(page).toContain("generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size, sessionKey)");
+    expect(page).toContain("abortAllImageConversationRequests()");
+    expect(page).toContain("generateImage(");
+    expect(page).toContain("abortController.signal");
     expect(page).toContain(
-      "editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size, sessionKey)",
+      "editImage(",
     );
     expect(api).toContain("authToken?: string");
     expect(api).toContain("Authorization: `Bearer ${token}`");
+  });
+
+  test("aborts deleted in-flight image requests so visible queue work can continue", () => {
+    const page = source("src/app/image/page.tsx");
+    const api = source("src/lib/api.ts");
+    const request = source("src/lib/request.ts");
+
+    expect(request).toContain("signal?: AbortSignal");
+    expect(request).toContain("signal,");
+    expect(api).toContain("signal?: AbortSignal");
+    expect(api).toContain("signal,");
+    expect(page).toContain("const imageRequestAbortControllersRef = useRef<Map<string, AbortController>>(new Map())");
+    expect(page).toContain("const abortImageConversationRequest = useCallback");
+    expect(page).toContain("abortImageConversationRequest(id)");
+    expect(page).toContain("const abortAllImageConversationRequests = useCallback");
+    expect(page).toContain("abortAllImageConversationRequests()");
+    expect(page).toContain("imageRequestAbortControllersRef.current.set(conversationId, abortController)");
+    expect(page).toContain("abortController.signal.aborted");
+    expect(page).toContain("markCurrentQueuedTurnCancelled");
+    expect(page).toContain("imageRequestAbortControllersRef.current.delete(conversationId)");
+  });
+
+  test("clears visible image queues before awaiting history deletion", () => {
+    const page = source("src/app/image/page.tsx");
+    const clearHistory = page.slice(page.indexOf("const handleClearHistory = async () => {"), page.indexOf("const openDeleteConversationConfirm"));
+
+    expect(clearHistory).toContain("const previousConversations = conversationsRef.current");
+    expect(clearHistory).toContain("abortAllImageConversationRequests()");
+    expect(clearHistory).toContain("conversationsRef.current = []");
+    expect(clearHistory).toContain("setConversations([])");
+    expect(clearHistory).toContain("await clearImageConversations(userId)");
+    expect(clearHistory.indexOf("conversationsRef.current = []")).toBeLessThan(clearHistory.indexOf("await clearImageConversations(userId)"));
+    expect(clearHistory.indexOf("setConversations([])")).toBeLessThan(clearHistory.indexOf("await clearImageConversations(userId)"));
+    expect(clearHistory).toContain("markAbortedImageQueueRunsFailed");
+    expect(clearHistory).toContain("setConversations(restoredConversations)");
+  });
+
+  test("does not finalize aborted image turns as successful loading results", () => {
+    const page = source("src/app/image/page.tsx");
+    const queueRunner = page.slice(page.indexOf("const runConversationQueue = useCallback"), page.indexOf("const drainConversationQueues = useCallback"));
+
+    expect(page).toContain("function markAbortedImageQueueRunsFailed");
+    expect(page).toContain("删除失败，已取消未完成的图片请求");
+    expect(page).toContain("清空失败，已取消未完成的图片请求");
+    expect(queueRunner).toContain("const markCurrentQueuedTurnCancelled = async () =>");
+    expect(queueRunner).toContain('error: "图片请求已取消"');
+    expect(queueRunner).toContain("if (abortController.signal.aborted)");
+    expect(queueRunner.indexOf("await markCurrentQueuedTurnCancelled()")).toBeGreaterThan(queueRunner.indexOf("for (const pendingImage of pendingImages)"));
+    expect(queueRunner.indexOf("await markCurrentQueuedTurnCancelled()")).toBeLessThan(queueRunner.indexOf("const successCount = existingSuccessCount + resumedSuccessCount"));
   });
 
   test("image composer exposes fixed resolution presets instead of free-form ratios", () => {

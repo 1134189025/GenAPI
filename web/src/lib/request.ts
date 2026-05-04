@@ -143,16 +143,18 @@ type RequestOptions = {
     headers?: Record<string, string>;
     redirectOnUnauthorized?: boolean;
     timeoutMs?: number;
+    signal?: AbortSignal;
 };
 
 export async function httpRequest<T>(path: string, options: RequestOptions = {}) {
-    const {method = "GET", body, headers, redirectOnUnauthorized = true, timeoutMs} = options;
+    const {method = "GET", body, headers, redirectOnUnauthorized = true, timeoutMs, signal} = options;
     const config: RequestConfig = {
         url: path,
         method,
         data: body,
         headers,
         redirectOnUnauthorized,
+        signal,
     };
     const timeout = resolveRequestTimeoutMs(path, timeoutMs);
     if (timeout !== undefined) {
@@ -163,13 +165,14 @@ export async function httpRequest<T>(path: string, options: RequestOptions = {})
 }
 
 export async function httpBlobRequest(path: string, options: Omit<RequestOptions, "body"> = {}) {
-    const {method = "GET", headers, redirectOnUnauthorized = true, timeoutMs} = options;
+    const {method = "GET", headers, redirectOnUnauthorized = true, timeoutMs, signal} = options;
     const config: RequestConfig = {
         url: path,
         method,
         headers,
         redirectOnUnauthorized,
         responseType: "blob",
+        signal,
     };
     const timeout = resolveRequestTimeoutMs(path, timeoutMs);
     if (timeout !== undefined) {

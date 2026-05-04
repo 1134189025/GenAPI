@@ -593,13 +593,20 @@ function authorizationHeader(authToken?: string): Record<string, string> | undef
   return token ? { Authorization: `Bearer ${token}` } : undefined;
 }
 
-export async function generateImage(prompt: string, model?: ImageModel, size?: string, authToken?: string) {
+export async function generateImage(
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  authToken?: string,
+  signal?: AbortSignal,
+) {
   return httpRequest<ImageResponse>(
     "/api/image/generations",
     {
       method: "POST",
       headers: authorizationHeader(authToken),
       timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
+      signal,
       body: {
         prompt,
         ...(model ? { model } : {}),
@@ -617,6 +624,7 @@ export async function editImage(
   model?: ImageModel,
   size?: string,
   authToken?: string,
+  signal?: AbortSignal,
 ) {
   const formData = new FormData();
   const uploadFiles = Array.isArray(files) ? files : [files];
@@ -639,6 +647,7 @@ export async function editImage(
       method: "POST",
       headers: authorizationHeader(authToken),
       timeoutMs: IMAGE_EDIT_REQUEST_TIMEOUT_MS,
+      signal,
       body: formData,
     },
   );

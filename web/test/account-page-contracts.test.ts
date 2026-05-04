@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   buildAccountReferenceExport,
@@ -9,8 +11,14 @@ import {
   getDisplayAccountReference,
   isProblemAccount,
   parseAccountQuotaInput,
-} from "../src/app/accounts/page";
+} from "../src/app/accounts/account-page-helpers";
 import type { Account } from "../src/lib/api";
+
+const root = join(import.meta.dir, "..");
+
+function source(path: string) {
+  return readFileSync(join(root, path), "utf8");
+}
 
 function account(overrides: Partial<Account> & Pick<Account, "id" | "status">): Account {
   return {
@@ -122,6 +130,17 @@ describe("account problem filter contracts", () => {
       { id: "problem-b", token_ref: "token:b" },
       { id: "problem-c", token_ref: "token:c" },
     ]);
+  });
+
+  test("wires the refresh filtered action to the active account filters", () => {
+    const page = source("src/app/accounts/page.tsx");
+    const filteredRefs = page.slice(page.indexOf("const filteredAccountRefs = useMemo"), page.indexOf("const problemAccountRefs = useMemo"));
+    const refreshFilteredButton = page.slice(page.indexOf("刷新筛选结果") - 500, page.indexOf("刷新筛选结果") + 200);
+
+    expect(filteredRefs).toContain("getAccountRefreshRefsForFilter(accounts, { query, statusFilter, typeFilter })");
+    expect(refreshFilteredButton).toContain("handleRefreshAccounts(filteredAccountRefs)");
+    expect(refreshFilteredButton).not.toContain("selectedAccountRefs");
+    expect(refreshFilteredButton).not.toContain("currentRows");
   });
 
   test("builds problem deletion refs from only the active filter result", () => {

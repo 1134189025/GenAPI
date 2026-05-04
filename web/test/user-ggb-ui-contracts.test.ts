@@ -52,6 +52,9 @@ describe("user GGB UI contracts", () => {
     expect(membership).toContain("会员 GGB");
     expect(membership).toContain("总 GGB 余额");
     expect(membership).toContain("今日奖励");
+    expect(membership).toContain("每日签到领取普通 GGB 余额");
+    expect(membership).toContain("奖励会发放到普通 GGB 余额");
+    expect(membership).toContain("会员 GGB 按套餐周期刷新");
     expect(membership).toContain("GGB");
     expect(membership).not.toContain("张会员图片额度");
     expect(membership).not.toContain("普通图片额度");
@@ -59,9 +62,13 @@ describe("user GGB UI contracts", () => {
     expect(redeem).toContain("formatQuotaAsGgb");
     expect(redeem).toContain("GGB 余额");
     expect(redeem).toContain("GGB 余额码");
+    expect(redeem).toContain("邀请码仅用于注册流程");
+    expect(redeem).toContain("兑换码会去除首尾空格后提交");
     expect(redeem).not.toContain("当前图片额度");
 
     expect(nav).toContain("GGB");
+    expect(nav).toContain("会员状态、套餐和周期 GGB");
+    expect(nav).toContain("兑换 GGB 余额、并发和会员码");
     expect(nav).not.toContain("兑换图片额度、并发和会员码");
   });
 });

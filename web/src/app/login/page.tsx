@@ -46,7 +46,7 @@ export default function LoginPage() {
 
   if (isCheckingAuth) {
     return (
-      <AuthShell title="正在进入控制台" subtitle="正在确认已保存的登录状态。" icon={ShieldCheck}>
+      <AuthShell title="正在进入控制台" icon={ShieldCheck}>
         <div className="flex items-center justify-center gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-6 text-sm font-medium text-slate-500">
           <LoaderCircle className="size-5 animate-spin text-teal-500" />
           正在检查会话
@@ -58,7 +58,6 @@ export default function LoginPage() {
   return (
     <AuthShell
       title="欢迎回来"
-      subtitle="使用用户账号登录，JWT 会自动保存并用于控制台和网页生图功能。"
       icon={LockKeyhole}
       footer={
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

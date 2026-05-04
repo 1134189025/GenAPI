@@ -101,7 +101,7 @@ export function getManualUpdateGuidance(status: UpdateStatus | undefined): Manua
     if (!isDockerWebUpdateMode(status)) {
       return {
         title: "容器部署需要手动更新",
-        description: "当前部署缺少网页更新所需的 Docker 授权或 compose 配置。请先同步最新 docker-compose.yml，再在部署目录运行以下命令。",
+        description: "缺少网页更新所需的 Docker 授权或 compose 配置。同步最新 docker-compose.yml 后，在部署目录运行：",
         command: DOCKER_MANUAL_UPDATE_COMMAND,
       };
     }
@@ -276,9 +276,9 @@ export function UpdateCard() {
 
   if (isLoading && !status) {
     return (
-      <DataPanel title="版本更新中心" description="正在检查当前部署版本和 GitHub Release 状态。">
+      <DataPanel title="版本更新中心" description="正在检查更新状态。">
         <div className="p-5">
-          <EmptyState title="正在加载更新状态" description="同步版本、发布信息和部署模式。 " icon={<LoaderCircle className="size-7 animate-spin" />} />
+          <EmptyState title="正在加载更新状态" description="请稍候。" icon={<LoaderCircle className="size-7 animate-spin" />} />
         </div>
       </DataPanel>
     );
@@ -287,7 +287,7 @@ export function UpdateCard() {
   return (
     <DataPanel
       title="版本更新中心"
-      description="面向 Genapi 0.1.15 的系统更新入口；systemd release 和受支持的容器部署可网页更新，其余部署显示手动步骤。"
+      description="支持的部署可网页更新；其余部署显示手动命令。"
       toolbar={
         <>
           <Button
@@ -391,7 +391,7 @@ export function UpdateCard() {
                 {releaseNotes}
               </div>
             ) : (
-              <EmptyState title="暂无 Release 说明" description="刷新后会显示 GitHub Release 链接和发布说明。" />
+              <EmptyState title="暂无 Release 说明" description="刷新后显示 GitHub Release 链接。" />
             )}
 
             {releaseAssets.length ? (
@@ -407,7 +407,7 @@ export function UpdateCard() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-black">更新操作</h3>
-                <p className="mt-1 text-xs text-stone-400">发布包更新完成后会提示重启服务。</p>
+                <p className="mt-1 text-xs text-stone-400">完成后可能需要重启服务。</p>
               </div>
               <Pill tone={webUpdateMode ? "emerald" : "amber"}>{webUpdateMode ? "网页更新" : "手动更新"}</Pill>
             </div>
@@ -443,7 +443,7 @@ export function UpdateCard() {
                 重启服务
               </Button>
             ) : webUpdateMode ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-stone-300">更新或回滚完成后，这里会显示重启服务按钮。</div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-stone-300">等待更新结果。</div>
             ) : null}
 
             {lastMessage ? (

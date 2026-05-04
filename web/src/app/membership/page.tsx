@@ -210,9 +210,7 @@ export default function MembershipPage() {
   return (
     <section className="space-y-6">
       <PageHeader
-        eyebrow="Membership"
         title="会员中心"
-        description="查看当前会员状态、周期 GGB、到期时间和可兑换的会员套餐。会员兑换码请到兑换中心输入。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading || isCheckinLoading} onClick={() => void load()}>
@@ -345,7 +343,7 @@ export default function MembershipPage() {
         )}
       </DataPanel>
 
-      <DataPanel title="会员套餐" description="管理员启用的套餐会显示在这里，兑换码由管理员生成并发放。">
+      <DataPanel title="会员套餐">
         <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
           {plans.map((plan) => (
             <div key={plan.id} className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">

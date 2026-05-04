@@ -182,7 +182,7 @@ export function ImageComposer({
           </div>
         ) : null}
 
-        <div className="rounded-[22px] border border-stone-200 bg-white/95 shadow-[0_12px_36px_-30px_rgba(28,25,23,0.42)] backdrop-blur sm:rounded-[30px] sm:shadow-[0_18px_60px_-36px_rgba(28,25,23,0.45)]">
+        <div className="glass-panel rounded-[2rem] sm:rounded-[2.5rem]">
           <div
             className="relative cursor-text"
             onClick={() => {
@@ -211,13 +211,13 @@ export function ImageComposer({
                   void onSubmit();
                 }
               }}
-              className="max-h-[18dvh] min-h-[44px] resize-none overflow-y-auto rounded-[22px] border-0 bg-transparent px-3 pt-2.5 pb-2 text-[15px] leading-6 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:max-h-[32dvh] sm:min-h-[116px] sm:rounded-[30px] sm:px-6 sm:pt-5 sm:leading-7"
+              className="max-h-[18dvh] min-h-[44px] resize-none overflow-y-auto border-0 bg-transparent px-4 pt-4 pb-2 text-base leading-6 text-foreground shadow-none placeholder:text-foreground/40 focus-visible:ring-0 sm:max-h-[32dvh] sm:min-h-[120px] sm:px-8 sm:pt-7 sm:text-[15px] sm:leading-7"
             />
 
-            <div className="border-t border-stone-100 px-2.5 py-2.5 sm:px-4 sm:py-3">
-              <div className="flex items-end justify-between gap-2 sm:gap-3">
+            <div className="px-4 py-4 sm:px-6 sm:py-5">
+              <div className="flex items-end justify-between gap-3">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1.5 rounded-full bg-stone-100 p-1">
+                  <div className="flex items-center gap-1 rounded-full bg-black/5 p-1 dark:bg-white/5">
                     <ModeButton active={mode === "generate"} onClick={() => onModeChange("generate")}>
                       文生图
                     </ModeButton>
@@ -229,22 +229,22 @@ export function ImageComposer({
                   {mode === "edit" ? (
                     <Button
                       type="button"
-                      variant="outline"
-                      className="h-8 touch-manipulation rounded-full border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                      variant="ghost"
+                      className="h-9 rounded-full bg-black/5 px-4 text-xs font-semibold text-foreground/70 dark:bg-white/5"
                       onClick={onPickReferenceImage}
                     >
-                      <ImagePlus className="size-3.5 sm:size-4" />
+                      <ImagePlus className="size-4" />
                       <span>{referenceImages.length > 0 ? "加参考图" : "上传参考图"}</span>
                     </Button>
                   ) : null}
 
                   <div
                     className={cn(
-                      "items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-2 sm:px-3 sm:py-1",
+                      "items-center gap-2 rounded-full bg-black/5 px-4 py-1.5 dark:bg-white/5",
                       isMoreSettingsOpen ? "flex" : "hidden sm:flex",
                     )}
                   >
-                    <span className="text-[11px] font-medium text-stone-700 sm:text-sm">张数</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-foreground/50">张数</span>
                     <Input
                       type="number"
                       min="1"
@@ -252,27 +252,27 @@ export function ImageComposer({
                       step="1"
                       value={imageCount}
                       onChange={(event) => onImageCountChange(event.target.value)}
-                      className="h-7 w-[40px] border-0 bg-transparent px-0 text-center text-xs font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:h-8 sm:w-[58px] sm:text-sm"
+                      className="h-10 w-12 border-0 bg-transparent p-0 text-center text-base font-bold text-foreground ring-0 focus-visible:ring-0 sm:h-6 sm:w-10 sm:text-sm"
                     />
                   </div>
                   <div
                     ref={sizeMenuRef}
                     className={cn(
-                      "relative items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]",
+                      "relative items-center gap-2 rounded-full bg-black/5 px-4 py-1.5 dark:bg-white/5",
                       isMoreSettingsOpen ? "flex" : "hidden sm:flex",
                     )}
                   >
-                    <span className="font-medium text-stone-700 sm:text-sm">尺寸</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-foreground/50">尺寸</span>
                     <button
                       type="button"
-                      className="flex h-7 w-[112px] max-w-[calc(100vw-8rem)] touch-manipulation items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 sm:h-8 sm:w-[128px] sm:max-w-none"
+                      className="flex h-10 w-28 items-center justify-between text-left text-base font-bold text-foreground sm:h-6 sm:w-24 sm:text-sm"
                       onClick={() => setIsSizeMenuOpen((open) => !open)}
                     >
                       <span className="truncate">{imageSizeLabel}</span>
-                      <ChevronDown className={cn("size-4 shrink-0 opacity-60 transition", isSizeMenuOpen && "rotate-180")} />
+                      <ChevronDown className={cn("size-3.5 transition-transform", isSizeMenuOpen && "rotate-180")} />
                     </button>
                     {isSizeMenuOpen ? (
-                      <div className="absolute right-0 bottom-[calc(100%+10px)] z-50 max-h-[min(16rem,calc(100dvh-12rem))] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:right-auto sm:left-0 sm:w-[186px]">
+                      <div className="absolute right-0 bottom-full z-50 mb-3 max-h-[min(16rem,calc(100dvh-12rem))] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain glass-panel rounded-3xl p-2 shadow-2xl sm:left-0 sm:right-auto sm:w-[186px]">
                         {imageSizeOptions.map((option) => {
                           const active = option.value === imageSize;
                           return (
@@ -280,8 +280,8 @@ export function ImageComposer({
                               key={option.label}
                               type="button"
                               className={cn(
-                                "flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100",
-                                active && "bg-stone-100 font-medium text-stone-950",
+                                "flex w-full items-center justify-between rounded-2xl px-4 py-2.5 text-left text-sm transition-colors",
+                                active ? "bg-primary/10 font-bold text-primary" : "text-foreground/70 hover:bg-black/5 dark:hover:bg-white/5",
                               )}
                               onClick={() => {
                                 onImageSizeChange(option.value);
@@ -300,8 +300,8 @@ export function ImageComposer({
                   <button
                     type="button"
                     className={cn(
-                      "touch-manipulation rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:py-2 sm:text-sm",
-                      isMoreSettingsOpen ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200",
+                      "h-9 rounded-full px-4 text-xs font-semibold transition-all",
+                      isMoreSettingsOpen ? "bg-foreground text-background" : "bg-black/5 text-foreground/60 dark:bg-white/5",
                     )}
                     onClick={() => setIsMoreSettingsOpen((open) => !open)}
                   >
@@ -313,26 +313,26 @@ export function ImageComposer({
                   type="button"
                   onClick={() => void onSubmit()}
                   disabled={!prompt.trim() || (mode === "edit" && referenceImages.length === 0)}
-                  className="inline-flex size-10 shrink-0 touch-manipulation items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-11"
                   aria-label={mode === "edit" ? "编辑图片" : "生成图片"}
+                  className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 disabled:bg-foreground/10 disabled:text-foreground/30 disabled:shadow-none"
                 >
-                  <ArrowUp className="size-3.5 sm:size-4" />
+                  <ArrowUp className="size-5" />
                 </button>
               </div>
 
               {isMoreSettingsOpen ? (
-                <div className="mt-2 grid gap-1.5 rounded-2xl bg-stone-50 px-3 py-2 text-[11px] leading-5 text-stone-600 sm:mt-3 sm:grid-cols-3 sm:gap-2 sm:rounded-3xl sm:px-4 sm:py-3 sm:text-xs">
+                <div className="mt-4 grid gap-4 rounded-2xl bg-black/5 p-4 dark:bg-white/5 sm:grid-cols-3">
                   <div>
-                    <span className="font-medium text-stone-900">{availableQuotaLabel}</span>
-                    <span className="ml-2">{availableQuota}</span>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-foreground/50">{availableQuotaLabel}</div>
+                    <div className="mt-0.5 text-sm font-semibold">{availableQuota}</div>
                   </div>
                   <div>
-                    <span className="font-medium text-stone-900">{estimatedUsageLabel}</span>
-                    <span className="ml-2">{estimatedUsage}</span>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-foreground/50">{estimatedUsageLabel}</div>
+                    <div className="mt-0.5 text-sm font-semibold">{estimatedUsage}</div>
                   </div>
                   <div>
-                    <span className="font-medium text-stone-900">任务</span>
-                    <span className="ml-2">{activeTaskCount > 0 ? `${activeTaskCount} 个处理中` : "空闲"}</span>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-foreground/50">处理状态</div>
+                    <div className="mt-0.5 text-sm font-semibold">{activeTaskCount > 0 ? `${activeTaskCount} 个任务` : "就绪"}</div>
                   </div>
                 </div>
               ) : null}
@@ -358,8 +358,8 @@ function ModeButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "touch-manipulation rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm",
-        active ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-900",
+        "h-7 rounded-full px-4 text-xs font-bold transition-all",
+        active ? "bg-white text-foreground shadow-sm dark:bg-zinc-800" : "text-foreground/55 hover:text-foreground/75",
       )}
     >
       {children}

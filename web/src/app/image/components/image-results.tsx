@@ -52,13 +52,7 @@ export function ImageResults({
     return (
       <div className="flex h-full min-h-[240px] items-center justify-center px-0 text-center sm:min-h-[420px] sm:px-2">
         <div className="w-full max-w-3xl">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-400 sm:mb-3 sm:text-xs sm:tracking-[0.28em]">
-            Image Studio
-          </p>
           <h1 className="text-xl font-semibold tracking-tight text-stone-950 sm:text-5xl">想生成什么图片？</h1>
-          <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-stone-500 sm:mt-4 sm:text-base sm:leading-7">
-            输入一句描述就能开始。需要改图时，直接粘贴或上传参考图。
-          </p>
           <div className="mt-4 flex gap-2 overflow-x-auto overscroll-x-contain pb-1 text-left sm:mt-8 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:pb-0">
             {promptIdeas.map((item) => (
               <button
@@ -74,7 +68,6 @@ export function ImageResults({
               </button>
             ))}
           </div>
-          <p className="mt-3 text-[11px] text-stone-400 sm:mt-5 sm:text-xs">试试这些提示，也可以直接写自己的想法。</p>
         </div>
       </div>
     );

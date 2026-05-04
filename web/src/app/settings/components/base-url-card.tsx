@@ -28,7 +28,7 @@ export function BaseUrlCard() {
             </div>
             <div>
               <h2 className="text-lg font-semibold tracking-tight">基础地址</h2>
-              <p className="text-sm text-stone-500">设置 `GENAPI_BASE_URL` 的本地配置值，保存后立即生效。</p>
+              <p className="text-sm text-stone-500">生成外部访问链接时使用。</p>
             </div>
           </div>
           <Badge variant={baseUrl.trim() ? "success" : "secondary"} className="w-fit rounded-md px-2.5 py-1">
@@ -50,7 +50,7 @@ export function BaseUrlCard() {
                 placeholder="https://example.com"
                 className="h-11 rounded-xl border-stone-200 bg-white"
               />
-              <p className="text-sm text-stone-500">留空则使用环境变量或默认值，保存时会自动去掉首尾空格。</p>
+              <p className="text-sm text-stone-500">留空使用环境变量或默认值；格式如 https://example.com。</p>
             </div>
 
             <div className="flex justify-end">

@@ -8,6 +8,16 @@ function source(path: string) {
   return readFileSync(join(root, path), "utf8");
 }
 
+function buttonContainingIcon(sourceText: string, iconName: string) {
+  const iconStart = sourceText.indexOf(`<${iconName}`);
+  expect(iconStart).toBeGreaterThanOrEqual(0);
+  const buttonStart = sourceText.lastIndexOf("<button", iconStart);
+  const buttonEnd = sourceText.indexOf("</button>", iconStart);
+  expect(buttonStart).toBeGreaterThanOrEqual(0);
+  expect(buttonEnd).toBeGreaterThan(buttonStart);
+  return sourceText.slice(buttonStart, buttonEnd);
+}
+
 describe("mobile image page contracts", () => {
   test("uses a dynamic viewport chat shell with safe-area composer spacing", () => {
     const page = source("src/app/image/page.tsx");
@@ -33,11 +43,10 @@ describe("mobile image page contracts", () => {
     expect(composer).toContain("max-h-[18dvh]");
     expect(composer).toContain("isDesktop ? 0.32 : 0.18");
     expect(composer).toContain("overflow-y-auto");
-    expect(composer).toContain("sm:min-h-[116px]");
+    expect(composer).toContain("sm:min-h-[120px]");
     expect(composer).toContain("sm:max-h-[32dvh]");
     expect(composer).not.toContain("min-h-[76px]");
     expect(composer).toContain("flex min-w-0 flex-1 flex-wrap");
-    expect(composer).toContain("touch-manipulation");
   });
 
   test("keeps reference image previews from expanding the fixed mobile workspace", () => {
@@ -70,6 +79,8 @@ describe("mobile image page contracts", () => {
     const composer = source("src/app/image/components/image-composer.tsx");
 
     expect(composer).toContain("right-0");
+    expect(composer).toContain("bottom-full");
+    expect(composer).toContain("mb-3");
     expect(composer).toContain("w-[min(18rem,calc(100vw-2rem))]");
     expect(composer).toContain("max-h-[min(16rem,calc(100dvh-12rem))]");
     expect(composer).toContain("overflow-y-auto");
@@ -84,8 +95,20 @@ describe("mobile image page contracts", () => {
     expect(page).toContain("pb-[calc(1rem+env(safe-area-inset-bottom))]");
     expect(page).toContain('aria-label="打开历史记录"');
     expect(page).toContain('aria-label="新建图片对话"');
-    expect(sidebar).toContain("pr-12 sm:pr-8");
-    expect(sidebar).toContain("size-9 sm:size-7");
-    expect(sidebar).toContain("opacity-100 sm:opacity-0 sm:group-hover:opacity-100");
+    expect(sidebar).toContain("right-2");
+    expect(sidebar).toContain("size-10");
+    expect(sidebar).toContain("touch-manipulation");
+    expect(sidebar).toContain("opacity-100");
+    expect(sidebar).toContain("sm:opacity-0 sm:group-hover:opacity-100");
+    expect(sidebar).toContain('aria-label="删除会话"');
+    expect(sidebar).not.toContain("opacity-0 group-hover:opacity-100");
+  });
+
+  test("labels the mobile submit icon button", () => {
+    const composer = source("src/app/image/components/image-composer.tsx");
+    const submitButton = buttonContainingIcon(composer, "ArrowUp");
+
+    expect(submitButton).toContain("onSubmit");
+    expect(submitButton).toContain("aria-label=");
   });
 });

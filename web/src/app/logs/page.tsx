@@ -109,7 +109,6 @@ function LogsContent() {
       <PageHeader
         eyebrow="Logs"
         title="日志管理"
-        description="查看调用日志和账号管理日志，按日期筛选并展开结构化详情。"
         actions={
           <>
             <Select value={type} onValueChange={(value) => setType(value as LogTypeValue)}>
@@ -139,15 +138,14 @@ function LogsContent() {
       />
 
       <div className="grid gap-3 md:grid-cols-4">
-        <StatCard label="日志条数" value={items.length} hint={typeLabels[type]} icon={<ScrollText className="size-5" />} tone="slate" />
-        <StatCard label="成功调用" value={successCount} hint="当前筛选范围" icon={<CheckCircle2 className="size-5" />} tone="emerald" />
-        <StatCard label="失败调用" value={failedCount} hint="当前筛选范围" icon={<XCircle className="size-5" />} tone={failedCount > 0 ? "rose" : "slate"} />
-        <StatCard label="平均耗时" value={averageDuration} hint="调用日志 duration_ms" icon={<Clock3 className="size-5" />} tone="blue" />
+        <StatCard label="日志条数" value={items.length} icon={<ScrollText className="size-5" />} tone="slate" />
+        <StatCard label="成功调用" value={successCount} icon={<CheckCircle2 className="size-5" />} tone="emerald" />
+        <StatCard label="失败调用" value={failedCount} icon={<XCircle className="size-5" />} tone={failedCount > 0 ? "rose" : "slate"} />
+        <StatCard label="平均耗时" value={averageDuration} icon={<Clock3 className="size-5" />} tone="blue" />
       </div>
 
       <DataPanel
         title={typeLabels[type] || "日志列表"}
-        description="表格展示筛选后的日志摘要，详情对话框保留原始 JSON 和图片预览。"
         toolbar={
           <>
             <Badge variant="secondary" className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">
@@ -164,7 +162,6 @@ function LogsContent() {
           <div className="p-5">
             <EmptyState
               title="正在加载日志"
-              description="从后端读取当前筛选范围内的日志。"
               icon={<LoaderCircle className="size-7 animate-spin" />}
             />
           </div>
@@ -212,7 +209,6 @@ function LogsContent() {
             <div className="px-5 py-6">
               <EmptyState
                 title="没有找到日志"
-                description="调整日志类型或日期范围后重试。"
                 icon={<Search className="size-7" />}
               />
             </div>

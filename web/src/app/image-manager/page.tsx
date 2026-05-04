@@ -79,7 +79,6 @@ function ImageManagerContent() {
       <PageHeader
         eyebrow="Images"
         title="图片管理"
-        description="按日期查看本地生成图片归档，快速复制地址、查看尺寸和打开大图。"
         actions={
           <>
             <DateRangeFilter
@@ -102,14 +101,13 @@ function ImageManagerContent() {
       />
 
       <div className="grid gap-3 md:grid-cols-3">
-        <StatCard label="图片总数" value={items.length} hint="当前筛选结果" icon={<ImageIcon className="size-5" />} tone="blue" />
-        <StatCard label="占用空间" value={formatSize(totalSize)} hint="按文件大小汇总" icon={<Database className="size-5" />} tone="emerald" />
-        <StatCard label="时间范围" value={dateRangeLabel} hint="归档筛选条件" icon={<CalendarDays className="size-5" />} tone="slate" />
+        <StatCard label="图片总数" value={items.length} icon={<ImageIcon className="size-5" />} tone="blue" />
+        <StatCard label="占用空间" value={formatSize(totalSize)} icon={<Database className="size-5" />} tone="emerald" />
+        <StatCard label="时间范围" value={dateRangeLabel} icon={<CalendarDays className="size-5" />} tone="slate" />
       </div>
 
       <DataPanel
         title="图片归档"
-        description="点击缩略图可查看大图；悬停后可复制图片访问地址。"
         toolbar={
           <>
             <Badge variant="secondary" className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">
@@ -126,7 +124,6 @@ function ImageManagerContent() {
           <div className="p-5">
             <EmptyState
               title="正在加载图片"
-              description="从本地归档读取图片列表和文件信息。"
               icon={<LoaderCircle className="size-7 animate-spin" />}
             />
           </div>
@@ -191,7 +188,6 @@ function ImageManagerContent() {
               <div className="px-5 py-6">
                 <EmptyState
                   title="没有找到图片"
-                  description="调整日期范围后重试，或先生成新的图片。"
                   icon={<ImageIcon className="size-7" />}
                 />
               </div>

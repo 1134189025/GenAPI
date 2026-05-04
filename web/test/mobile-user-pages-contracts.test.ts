@@ -24,9 +24,9 @@ describe("mobile user page layout contracts", () => {
   test("redeem page puts the code input before account statistics on mobile", () => {
     const redeemPage = source("src/app/redeem/page.tsx");
 
-    expect(redeemPage.indexOf("Redeem Form")).toBeGreaterThan(-1);
+    expect(redeemPage.indexOf("输入兑换码")).toBeGreaterThan(-1);
     expect(redeemPage.indexOf("RedeemStatCard")).toBeGreaterThan(-1);
-    expect(redeemPage.indexOf("Redeem Form")).toBeLessThan(redeemPage.indexOf("RedeemStatCard"));
+    expect(redeemPage.indexOf("输入兑换码")).toBeLessThan(redeemPage.indexOf("RedeemStatCard"));
     expect(redeemPage).toContain("grid gap-2 sm:grid-cols-2 xl:grid-cols-4");
     expect(redeemPage).toContain("space-y-2 p-4 sm:space-y-3 sm:p-6");
     expect(redeemPage).toContain("rounded-[20px] border border-slate-200/70 bg-white/90 p-3 shadow-sm sm:rounded-[24px] sm:p-4");

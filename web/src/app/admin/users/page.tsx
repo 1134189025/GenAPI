@@ -238,7 +238,7 @@ export default function AdminUsersPage() {
       <PageHeader
         eyebrow="Users"
         title="用户管理"
-        description="管理后台用户身份、登录状态、GGB 余额和图片并发限制。当前会话用户不能在界面中被禁用或删除。"
+        description="当前会话用户不能在界面中被禁用或删除。"
         actions={
           <>
             <Button
@@ -325,7 +325,6 @@ export default function AdminUsersPage() {
           <div className="p-5">
             <EmptyState
               title="暂无匹配用户"
-              description="调整搜索条件，或创建新的后台用户。"
               icon={<Users className="size-7" />}
               action={
                 <Button className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setIsCreateOpen(true)}>
@@ -515,9 +514,6 @@ function UserFormDialog({
       <DialogContent showCloseButton={!isSubmitting} className="max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "编辑用户" : "创建用户"}</DialogTitle>
-          <DialogDescription>
-            {isEdit ? "更新邮箱、密码、角色、启用状态、GGB 余额和图片并发限制。" : "创建可登录的后台用户，并设置初始 GGB 余额和图片并发限制。"}
-          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <Field>

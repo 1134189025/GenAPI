@@ -16,10 +16,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body
-        className="antialiased"
+        className="antialiased selection:bg-primary/20"
         style={{
           fontFamily:
-            '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif',
+            '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Helvetica Neue",sans-serif',
         }}
       >
         <Toaster position="top-center" richColors offset={48} />

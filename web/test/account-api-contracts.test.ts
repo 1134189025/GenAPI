@@ -7,7 +7,7 @@ mock.module("../src/lib/request", () => ({ httpBlobRequest, httpRequest }));
 mock.module("@/lib/request", () => ({ httpBlobRequest, httpRequest }));
 
 const api = await import("../src/lib/api");
-const accountPage = await import("../src/app/accounts/page");
+const accountPageHelpers = await import("../src/app/accounts/account-page-helpers");
 
 beforeEach(() => {
   httpBlobRequest.mockClear();
@@ -54,7 +54,7 @@ describe("account management API contracts", () => {
   });
 
   test("refresh account API sends the full active filter result payload", async () => {
-    const refs = accountPage.getAccountRefreshRefsForFilter(
+    const refs = accountPageHelpers.getAccountRefreshRefsForFilter(
       [
         {
           id: "problem-a",

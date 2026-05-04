@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, BadgeCheck, Gift, History, LoaderCircle, Sparkles, TicketCheck, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, History, LoaderCircle, Sparkles, TicketCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -134,21 +134,14 @@ export default function RedeemPage() {
       <div className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 p-5 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.22em] text-amber-700">
-              <Gift className="size-3.5" />
-              Redeem Center
-            </div>
-            <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换 GGB 余额与并发能力</h1>
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换 GGB 余额与并发能力</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              输入兑换码后会即时刷新当前账号能力，并在下方保留兑换记录。GGB 余额码、并发码和会员兑换码可在这里使用，邀请码仍仅用于注册流程。
+              GGB 余额码、并发码和会员兑换码可在这里使用；邀请码仅用于注册流程。
             </p>
           </div>
           <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-4 lg:w-[360px]">
-            <div className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Account State</div>
+            <div className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">当前账号</div>
             <div className="mt-2 text-lg font-black text-slate-950">{session.role === "admin" ? "管理员" : "普通用户"}</div>
-            <p className="mt-1 text-sm leading-6 text-slate-500">
-              兑换成功后表单下方会显示结果状态，统计卡和历史列表会同步刷新。
-            </p>
           </div>
         </div>
 
@@ -175,9 +168,8 @@ export default function RedeemPage() {
 
       <section className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl">
         <div className="border-b border-slate-200/70 p-5 sm:p-6">
-          <div className="text-[11px] font-black uppercase tracking-[0.22em] text-teal-600">Redeem Form</div>
-          <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">输入兑换码</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500">兑换码会去除首尾空格后提交，成功后会刷新 GGB 余额和并发。</p>
+          <h2 className="text-xl font-black tracking-tight text-slate-950">输入兑换码</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500">兑换码会去除首尾空格后提交。</p>
         </div>
 
         <div className="space-y-5 p-5 sm:p-6">
@@ -203,11 +195,6 @@ export default function RedeemPage() {
             </Button>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <RedeemHint title="GGB 余额码" description="增加可用 GGB 余额。" tone="teal" />
-            <RedeemHint title="并发码" description="提升同时处理图片请求能力。" tone="amber" />
-            <RedeemHint title="会员兑换码" description="激活会员套餐和周期 GGB。" tone="blue" />
-          </div>
         </div>
       </section>
 
@@ -215,28 +202,24 @@ export default function RedeemPage() {
         <RedeemStatCard
           label="GGB 余额"
           value={isLoading ? "加载中..." : quotaLabel(user)}
-          helper="可用于生成或编辑图片"
           icon={<Sparkles className="size-5" />}
           tone="teal"
         />
         <RedeemStatCard
           label="图片并发"
           value={isLoading ? "加载中..." : concurrencyLabel(user)}
-          helper="账号允许的同时处理能力"
           icon={<Zap className="size-5" />}
           tone="amber"
         />
         <RedeemStatCard
           label="当前活跃请求"
           value={user?.active_image_requests ?? 0}
-          helper="后端记录的正在处理图片请求"
           icon={<LoaderCircle className={cn("size-5", (user?.active_image_requests ?? 0) > 0 && "animate-spin")} />}
           tone={(user?.active_image_requests ?? 0) > 0 ? "blue" : "slate"}
         />
         <RedeemStatCard
           label="兑换记录"
           value={isLoading ? "加载中..." : items.length}
-          helper="当前账号历史记录"
           icon={<History className="size-5" />}
           tone="slate"
         />
@@ -245,9 +228,7 @@ export default function RedeemPage() {
       <section className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 border-b border-slate-200/70 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>
-            <div className="text-[11px] font-black uppercase tracking-[0.22em] text-teal-600">History</div>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">兑换记录</h2>
-            <p className="mt-1 text-sm text-slate-500">最近兑换会显示在这里，便于确认成功状态。</p>
+            <h2 className="text-xl font-black tracking-tight text-slate-950">兑换记录</h2>
           </div>
           <Badge variant="secondary" className="w-fit rounded-full bg-slate-100 px-3 py-1 text-slate-600">
             {items.length} 条记录
@@ -261,7 +242,7 @@ export default function RedeemPage() {
             </div>
           ) : items.length === 0 ? (
             <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center text-sm leading-6 text-slate-500 sm:rounded-[26px] sm:px-6 sm:py-10">
-              暂无兑换记录。成功兑换后会生成历史卡片。
+              暂无兑换记录
             </div>
           ) : (
             items.map((item) => <RedeemHistoryItem key={item.id} item={item} />)
@@ -275,13 +256,11 @@ export default function RedeemPage() {
 function RedeemStatCard({
   label,
   value,
-  helper,
   icon,
   tone,
 }: {
   label: string;
   value: string | number;
-  helper: string;
   icon: React.ReactNode;
   tone: "teal" | "amber" | "blue" | "slate";
 }) {
@@ -304,7 +283,6 @@ function RedeemStatCard({
           {icon}
         </div>
       </div>
-      <div className="mt-2 text-xs font-semibold leading-5 text-slate-500 sm:mt-3">{helper}</div>
     </div>
   );
 }
@@ -331,23 +309,6 @@ function FeedbackBanner({ feedback, action }: { feedback: RedeemFeedback; action
         </div>
       </div>
       {action}
-    </div>
-  );
-}
-
-function RedeemHint({ title, description, tone }: { title: string; description: string; tone: "teal" | "amber" | "blue" | "slate" }) {
-  return (
-    <div
-      className={cn(
-        "rounded-2xl border px-4 py-3",
-        tone === "teal" && "border-teal-100 bg-teal-50 text-teal-800",
-        tone === "amber" && "border-amber-100 bg-amber-50 text-amber-800",
-        tone === "blue" && "border-blue-100 bg-blue-50 text-blue-800",
-        tone === "slate" && "border-slate-200 bg-slate-50 text-slate-700",
-      )}
-    >
-      <div className="text-sm font-black">{title}</div>
-      <p className="mt-1 text-xs leading-5 opacity-75">{description}</p>
     </div>
   );
 }

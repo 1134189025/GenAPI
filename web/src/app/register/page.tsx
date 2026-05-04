@@ -35,7 +35,7 @@ export default function RegisterPage() {
 
 function RegisterLoadingState() {
   return (
-    <AuthShell title="准备注册入口" subtitle="正在确认会话状态并读取公开注册设置。" icon={MailCheck}>
+    <AuthShell title="准备注册入口" icon={MailCheck}>
       <div className="flex items-center justify-center gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-6 text-sm font-medium text-slate-500">
         <LoaderCircle className="size-5 animate-spin text-teal-500" />
         正在加载注册策略
@@ -170,7 +170,7 @@ function RegisterContent() {
   if (settings && !settings.registration_enabled) {
     const brandName = settings.site_name || "Genapi";
     return (
-      <AuthShell title="注册暂未开放" subtitle="当前站点关闭了公开注册，请联系管理员创建账号。" brandName={brandName} icon={Ticket} tone="amber">
+      <AuthShell title="注册暂未开放" brandName={brandName} icon={Ticket} tone="amber">
         <AuthNotice
           title="公开注册入口已关闭"
           description="管理员可以在系统设置中重新开放注册，或为你手动创建用户账号。"
@@ -189,7 +189,6 @@ function RegisterContent() {
     return (
       <AuthShell
         title="无法读取注册设置"
-        subtitle="注册策略需要从后端读取，避免把邮箱验证、邀请码或优惠码误判为关闭。"
         icon={WifiOff}
         tone="amber"
       >
@@ -219,12 +218,12 @@ function RegisterContent() {
   const emailHint =
     settings.email_domain_whitelist.length > 0
       ? `允许域名：${settings.email_domain_whitelist.join("、")}`
-      : "用于登录和接收注册验证码。";
+      : undefined;
 
   return (
     <AuthShell
       title="创建用户账号"
-      subtitle="注册后直接进入生图控制台，图片请求会按账号额度扣减。"
+      subtitle="图片请求会按账号额度扣减。"
       brandName={brandName}
       icon={UserPlus}
       maxWidth="max-w-[590px]"
@@ -323,7 +322,7 @@ function RegisterContent() {
             onChange={(event) => setPromoCode(event.target.value)}
             placeholder="WELCOME"
             disabled={isSubmitting}
-            hint={promoCode ? "已从链接或输入框填入，提交注册时会一并校验。" : "如有活动码，可在这里填写。"}
+            hint={promoCode ? "已从链接或输入框填入，提交注册时会一并校验。" : undefined}
           />
         ) : null}
 

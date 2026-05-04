@@ -7,7 +7,7 @@ export function SettingsHeader() {
     <PageHeader
       eyebrow="Settings"
       title="设置"
-      description="集中配置系统运行参数、注册认证、CPA 与 Sub2API 导入源。"
+      description="系统运行、注册认证、CPA 与 Sub2API。"
     />
   );
 }

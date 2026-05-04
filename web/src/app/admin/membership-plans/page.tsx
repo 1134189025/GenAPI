@@ -201,7 +201,7 @@ export default function AdminMembershipPlansPage() {
       <PageHeader
         eyebrow="Membership Plans"
         title="会员套餐管理"
-        description="创建、更新、启用、排序和删除会员套餐。被兑换码或会员记录引用的套餐删除时会由后端禁用。"
+        description="被兑换码或会员记录引用的套餐删除时会由后端禁用。"
         actions={
           <>
             <Button variant="outline" className="h-10 rounded-xl border-stone-200 bg-white/85" disabled={isLoading} onClick={() => void load()}>
@@ -230,7 +230,7 @@ export default function AdminMembershipPlansPage() {
           </div>
         ) : items.length === 0 ? (
           <div className="p-5">
-            <EmptyState title="暂无会员套餐" description="创建套餐后即可用于生成会员兑换码。" icon={<Crown className="size-7" />} />
+            <EmptyState title="暂无会员套餐" icon={<Crown className="size-7" />} />
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -330,7 +330,6 @@ function PlanDialog({
       <DialogContent showCloseButton={!isSubmitting} className="max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "创建会员套餐" : "编辑会员套餐"}</DialogTitle>
-          <DialogDescription>设置套餐名称、说明、有效期、周期 GGB、启用状态和排序。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <Field>
