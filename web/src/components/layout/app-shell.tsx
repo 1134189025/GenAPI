@@ -25,8 +25,13 @@ import { logout } from "@/lib/api";
 import { isAuthSessionChangedError, verifyStoredAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/utils";
 import {
+  deactivateAllImageQueueRuntimes,
+  deactivateStaleImageQueueRuntimes,
+} from "@/app/image/image-queue-runtime";
+import {
   clearStoredAuthSession,
   getStoredAuthSession,
+  AUTH_SESSION_BROADCAST_CHANNEL,
   type StoredAuthSession,
 } from "@/store/auth";
 import {
@@ -224,6 +229,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isPublic, pathname]);
 
   useEffect(() => {
+    if (!session?.key) {
+      deactivateAllImageQueueRuntimes();
+      return;
+    }
+    deactivateStaleImageQueueRuntimes(session.key);
+  }, [session?.key]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+      return;
+    }
+    const channel = new BroadcastChannel(AUTH_SESSION_BROADCAST_CHANNEL);
+    channel.onmessage = () => {
+      void getStoredAuthSession().then((storedSession) => {
+        if (storedSession?.key) {
+          deactivateStaleImageQueueRuntimes(storedSession.key);
+          return;
+        }
+        deactivateAllImageQueueRuntimes();
+      });
+    };
+    return () => {
+      channel.close();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!mobileOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -235,6 +267,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [mobileOpen]);
 
   const handleLogout = async () => {
+    deactivateAllImageQueueRuntimes();
     try {
       await logout();
     } catch {

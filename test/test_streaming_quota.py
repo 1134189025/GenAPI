@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
 import sys
@@ -81,6 +82,91 @@ class StreamingQuotaSettlementTests(unittest.TestCase):
 
         refreshed = self.user_service.get_user(user["id"])
         self.assert_user_ggb(refreshed, GGB_PER_IMAGE)
+        self.assertEqual(refreshed["active_image_requests"], 0)
+
+    def test_closed_sse_response_after_open_comment_refunds_reserved_quota(self) -> None:
+        user = self.user_service.create_user(
+            email="stream-open-disconnect@example.com",
+            password="UserPass123!",
+            image_quota=GGB_PER_IMAGE,
+            image_concurrency=1,
+        )
+        reservation = self.user_service.reserve_image_quota(user, 1, "/api/image/generations")
+        self.assert_user_ggb(self.user_service.get_user(user["id"]), 0)
+        self.assertEqual(self.user_service.get_user(user["id"])["active_image_requests"], 1)
+
+        def image_items():
+            yield {"created": 1, "data": [{"b64_json": "generated-image"}]}
+
+        call = self.log_service_module.LoggedCall(
+            user,
+            "/api/image/generations",
+            "gpt-image-2",
+            "stream-test",
+        )
+        with patch.object(self.log_service_module.log_service, "add"):
+            tracked_items = call.stream(image_items(), quota_reservation=reservation)
+            response = self.log_service_module._QuotaTrackedStreamingResponse(
+                self.log_service_module.sse_json_stream,
+                tracked_items,
+                media_type="text/event-stream",
+            )
+
+            async def send(message):
+                if message["type"] == "http.response.body" and bytes(message.get("body") or b"").startswith(b"data:"):
+                    raise OSError("client disconnected before image chunk delivery")
+
+            async def run_response() -> None:
+                with self.assertRaisesRegex(OSError, "client disconnected"):
+                    await response.stream_response(send)
+
+            asyncio.run(run_response())
+
+        refreshed = self.user_service.get_user(user["id"])
+        self.assert_user_ggb(refreshed, GGB_PER_IMAGE)
+        self.assertEqual(refreshed["active_image_requests"], 0)
+
+    def test_closed_sse_response_after_image_chunk_charges_actual_ggb(self) -> None:
+        user = self.user_service.create_user(
+            email="stream-image-disconnect@example.com",
+            password="UserPass123!",
+            image_quota=GGB_PER_IMAGE,
+            image_concurrency=1,
+        )
+        reservation = self.user_service.reserve_image_quota(user, 1, "/api/image/generations")
+        self.assert_user_ggb(self.user_service.get_user(user["id"]), 0)
+        self.assertEqual(self.user_service.get_user(user["id"])["active_image_requests"], 1)
+
+        def image_items():
+            yield {"created": 1, "data": [{"b64_json": "generated-image"}]}
+
+        call = self.log_service_module.LoggedCall(
+            user,
+            "/api/image/generations",
+            "gpt-image-2",
+            "stream-test",
+        )
+        with patch.object(self.log_service_module.log_service, "add"):
+            tracked_items = call.stream(image_items(), quota_reservation=reservation)
+            response = self.log_service_module._QuotaTrackedStreamingResponse(
+                self.log_service_module.sse_json_stream,
+                tracked_items,
+                media_type="text/event-stream",
+            )
+
+            async def send(message):
+                body = bytes(message.get("body") or b"") if message["type"] == "http.response.body" else b""
+                if body == b"data: [DONE]\n\n":
+                    raise OSError("client disconnected after image chunk delivery")
+
+            async def run_response() -> None:
+                with self.assertRaisesRegex(OSError, "client disconnected"):
+                    await response.stream_response(send)
+
+            asyncio.run(run_response())
+
+        refreshed = self.user_service.get_user(user["id"])
+        self.assert_user_ggb(refreshed, 0)
         self.assertEqual(refreshed["active_image_requests"], 0)
 
     def test_failed_stream_with_delivered_image_charges_actual_ggb(self) -> None:

@@ -74,7 +74,7 @@ export function ImageResults({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[980px] flex-col gap-8">
+    <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-8">
       {selectedConversation.turns.map((turn) => {
         const referenceLightboxImages = turn.referenceImages.map((image, index) => ({
           id: `${turn.id}-reference-${index}`,
@@ -149,7 +149,7 @@ export function ImageResults({
                   ) : null}
                 </div>
 
-                <div className="columns-1 gap-4 space-y-4 sm:columns-2 xl:columns-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
                   {turn.images.map((image, index) => {
                     if (image.status === "success" && (image.b64_json || image.url)) {
                       const currentIndex = successfulTurnImages.findIndex((item) => item.id === image.id);
@@ -170,17 +170,17 @@ export function ImageResults({
                       return (
                         <div
                           key={image.id}
-                          className="break-inside-avoid overflow-hidden rounded-[28px] border border-stone-200 bg-white shadow-sm"
+                          className="min-w-0 overflow-hidden rounded-[28px] border border-stone-200 bg-white shadow-sm"
                         >
                           <button
                             type="button"
                             onClick={() => onOpenLightbox(successfulTurnImages, Math.max(0, currentIndex))}
-                            className="group block w-full cursor-zoom-in"
+                            className={cn("group block w-full cursor-zoom-in bg-stone-50", getImageAspectClass(targetSize || turn.size))}
                           >
                             <img
                               src={imageSrc}
                               alt={`Generated result ${index + 1}`}
-                              className="block h-auto w-full transition duration-200 group-hover:brightness-90"
+                              className="block h-full w-full object-contain transition duration-200 group-hover:brightness-90"
                               onLoad={(event) => {
                                 updateImageDimensions(
                                   image.id,
@@ -221,7 +221,7 @@ export function ImageResults({
                         <div
                           key={image.id}
                           className={cn(
-                            "break-inside-avoid overflow-hidden rounded-[28px] border border-rose-200 bg-rose-50",
+                            "min-w-0 overflow-hidden rounded-[28px] border border-rose-200 bg-rose-50",
                             getImageAspectClass(turn.size),
                           )}
                         >
@@ -236,7 +236,7 @@ export function ImageResults({
                       <div
                         key={image.id}
                         className={cn(
-                          "break-inside-avoid overflow-hidden rounded-[28px] border border-stone-200/80 bg-stone-100/80",
+                          "min-w-0 overflow-hidden rounded-[28px] border border-stone-200/80 bg-stone-100/80",
                           getImageAspectClass(turn.size),
                         )}
                       >
@@ -301,10 +301,10 @@ function getImageAspectClass(size: string) {
   if (size === "1:1" || size === "1024x1024") {
     return "aspect-square";
   }
-  if (size === "16:9" || size === "1536x864") {
+  if (size === "16:9" || size === "1536x864" || size === "1920x1080" || size === "2560x1440" || size === "3840x2160") {
     return "aspect-video";
   }
-  if (size === "9:16" || size === "864x1536") {
+  if (size === "9:16" || size === "864x1536" || size === "1080x1920" || size === "1440x2560" || size === "2160x3840") {
     return "aspect-[9/16]";
   }
   if (size === "4:3" || size === "1280x960") {

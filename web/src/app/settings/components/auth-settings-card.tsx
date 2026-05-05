@@ -117,7 +117,7 @@ export function AuthSettingsCard() {
         <div className="space-y-4 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
           <div>
             <h3 className="text-sm font-bold text-stone-900">签到奖励</h3>
-            <p className="mt-1 text-xs leading-5 text-stone-500">每日与连续签到奖励，单位 GGB。</p>
+            <p className="mt-1 text-xs leading-5 text-stone-500">每日与连续签到奖励，单位狗狗币。</p>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
@@ -135,7 +135,7 @@ export function AuthSettingsCard() {
               />
             </label>
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">每日奖励 GGB</label>
+              <label className="text-sm text-stone-700">每日奖励狗狗币</label>
               <Input
                 value={String(settings.checkin_daily_image_quota)}
                 type="number"
@@ -155,7 +155,7 @@ export function AuthSettingsCard() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">额外奖励 GGB</label>
+              <label className="text-sm text-stone-700">额外奖励狗狗币</label>
               <Input
                 value={String(settings.checkin_streak_bonus_image_quota)}
                 type="number"
@@ -182,7 +182,7 @@ export function AuthSettingsCard() {
             <Input value={settings.site_name} onChange={(event) => patch({ site_name: event.target.value })} className="h-10 rounded-xl border-stone-200 bg-white" />
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">默认赠送 GGB</label>
+            <label className="text-sm text-stone-700">默认赠送狗狗币</label>
             <Input value={String(settings.default_image_quota)} type="number" min={0} onChange={(event) => patch({ default_image_quota: Number(event.target.value) || 0 })} className="h-10 rounded-xl border-stone-200 bg-white" />
           </div>
           <div className="space-y-2">

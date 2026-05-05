@@ -95,7 +95,7 @@ describe("admin operations dashboard pages", () => {
     expect(membershipPage).toContain("兑换中心");
 
     expect(adminPlansPage).toContain("会员套餐管理");
-    expect(adminPlansPage).toContain("周期 GGB");
+    expect(adminPlansPage).toContain("周期狗狗币");
     expect(adminPlansPage).toContain("排序");
     expect(adminPlansPage).toContain('const canLoadAdminData = !isCheckingAuth && session?.role === "admin";');
 
@@ -104,31 +104,31 @@ describe("admin operations dashboard pages", () => {
     expect(adminRedeemCodes).toContain("请选择会员套餐");
     expect(redeemPage).toContain("会员兑换码");
     expect(imagePage).toContain("member_image_quota");
-    expect(usersPage).toContain("会员 GGB");
+    expect(usersPage).toContain("会员狗狗币");
   });
 
-  test("admin GGB UI keeps old payload fields and non-balance image limits distinct", () => {
+  test("admin dog coin UI keeps old payload fields and non-balance image limits distinct", () => {
     const usersPage = source("src/app/admin/users/page.tsx");
     const adminPlansPage = source("src/app/admin/membership-plans/page.tsx");
     const adminRedeemCodes = source("src/app/admin/redeem-codes/page.tsx");
     const promoCodesPage = source("src/app/admin/promo-codes/page.tsx");
     const redeemHelpers = source("src/app/admin/redeem-codes/components/redeem-code-helpers.ts");
 
-    expect(usersPage).toContain("GGB 余额");
-    expect(usersPage).toContain("会员 GGB");
+    expect(usersPage).toContain("狗狗币余额");
+    expect(usersPage).toContain("会员狗狗币");
     expect(usersPage).toContain("图片并发");
     expect(usersPage).toContain("image_quota:");
     expect(usersPage).toContain("image_concurrency:");
 
-    expect(adminPlansPage).toContain("周期 GGB");
+    expect(adminPlansPage).toContain("周期狗狗币");
     expect(adminPlansPage).toContain("period_image_quota");
 
-    expect(adminRedeemCodes).toContain("GGB 兑换码");
+    expect(adminRedeemCodes).toContain("狗狗币兑换码");
     expect(adminRedeemCodes).toContain("图片并发");
     expect(adminRedeemCodes).toContain("type: generateForm.type");
-    expect(redeemHelpers).toContain('return "GGB"');
+    expect(redeemHelpers).toContain('return "狗狗币"');
 
-    expect(promoCodesPage).toContain("赠送 GGB");
+    expect(promoCodesPage).toContain("赠送狗狗币");
     expect(promoCodesPage).toContain("image_quota:");
   });
 

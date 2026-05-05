@@ -28,7 +28,7 @@ export function getRedeemCodeStatus(
 }
 
 export function getRedeemCodeTypeLabel(type: RedeemCodeType) {
-  if (type === "image_quota") return "GGB";
+  if (type === "image_quota") return "狗狗币";
   if (type === "concurrency") return "图片并发";
   if (type === "membership") return "会员兑换";
   return "邀请码";
@@ -37,7 +37,7 @@ export function getRedeemCodeTypeLabel(type: RedeemCodeType) {
 export function getRedeemValueLabel(item: Pick<RedeemCode, "type" | "value" | "membership_plan_id">) {
   if (item.type === "membership") return "会员套餐";
   if (item.type === "invitation") return "注册邀请";
-  if (item.type === "image_quota") return `+${item.value} GGB`;
+  if (item.type === "image_quota") return `+${item.value} 狗狗币`;
   return `+${item.value}`;
 }
 

@@ -181,17 +181,17 @@ describe("settings UI helper contracts", () => {
     expect(getUpdateActionHint(dockerStatus)).not.toContain("Docker socket is not mounted");
   });
 
-  test("auth settings display GGB for rewards while keeping legacy quota payload fields", () => {
+  test("auth settings display dog coins for rewards while keeping legacy quota payload fields", () => {
     const authSettings = source("src/app/settings/components/auth-settings-card.tsx");
     const authHelpers = source("src/app/settings/components/auth-settings-helpers.ts");
 
     expect(authSettings).toContain('description="正在读取认证配置。"');
     expect(authSettings).toContain("注册、邮箱、邀请码、奖励和 SMTP");
     expect(authSettings).toContain("SMTP 密码留空会保留旧密码");
-    expect(authSettings).toContain("每日与连续签到奖励，单位 GGB。");
-    expect(authSettings).toContain("每日奖励 GGB");
-    expect(authSettings).toContain("额外奖励 GGB");
-    expect(authSettings).toContain("默认赠送 GGB");
+    expect(authSettings).toContain("每日与连续签到奖励，单位狗狗币。");
+    expect(authSettings).toContain("每日奖励狗狗币");
+    expect(authSettings).toContain("额外奖励狗狗币");
+    expect(authSettings).toContain("默认赠送狗狗币");
     expect(authSettings).toContain("默认图片并发");
     expect(authSettings).toContain("checkin_daily_image_quota");
     expect(authSettings).toContain("checkin_streak_bonus_image_quota");
@@ -203,8 +203,8 @@ describe("settings UI helper contracts", () => {
     expect(authHelpers).toContain("default_image_quota");
     expect(authHelpers).toContain("default_image_concurrency");
 
-    expect(authSettings).not.toContain("正在读取邮箱验证、邀请码、签到奖励、默认赠送 GGB 和 SMTP 配置。");
-    expect(authSettings).not.toContain("配置邮箱验证、邀请码、优惠码、签到奖励、默认赠送 GGB 和 SMTP。SMTP 密码留空会保留旧密码。");
+    expect(authSettings).not.toContain("正在读取邮箱验证、邀请码、签到奖励、默认赠送狗狗币和 SMTP 配置。");
+    expect(authSettings).not.toContain("配置邮箱验证、邀请码、优惠码、签到奖励、默认赠送狗狗币和 SMTP。SMTP 密码留空会保留旧密码。");
   });
 
   test("system update start requires explicit confirmation", () => {

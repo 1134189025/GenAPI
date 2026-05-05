@@ -19,7 +19,7 @@ type RedeemFeedback = {
 };
 
 function typeLabel(type: string) {
-  if (type === "image_quota") return "GGB 余额";
+  if (type === "image_quota") return "狗狗币余额";
   if (type === "concurrency") return "图片并发";
   if (type === "membership") return "会员兑换";
   return "邀请码";
@@ -109,7 +109,7 @@ export default function RedeemPage() {
       setFeedback({
         type: "success",
         title: "兑换成功",
-        message: `${rewardLabel} 已到账。当前 GGB 余额 ${quotaLabel(data.user)}，图片并发 ${concurrencyLabel(data.user)}。`,
+        message: `${rewardLabel} 已到账。当前狗狗币余额 ${quotaLabel(data.user)}，图片并发 ${concurrencyLabel(data.user)}。`,
       });
       toast.success("兑换成功");
     } catch (error) {
@@ -134,9 +134,9 @@ export default function RedeemPage() {
       <div className="overflow-hidden rounded-[32px] border border-white/80 bg-white/90 p-5 shadow-[0_28px_90px_-52px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换 GGB 余额与并发能力</h1>
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">兑换狗狗币余额与并发能力</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              GGB 余额码、并发码和会员兑换码可在这里使用；邀请码仅用于注册流程。
+              狗狗币余额码、并发码和会员兑换码可在这里使用；邀请码仅用于注册流程。
             </p>
           </div>
           <div className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-4 lg:w-[360px]">
@@ -200,7 +200,7 @@ export default function RedeemPage() {
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <RedeemStatCard
-          label="GGB 余额"
+          label="狗狗币余额"
           value={isLoading ? "加载中..." : quotaLabel(user)}
           icon={<Sparkles className="size-5" />}
           tone="teal"

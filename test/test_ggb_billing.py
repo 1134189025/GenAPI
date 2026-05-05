@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
 import sqlite3
@@ -480,6 +481,74 @@ class GGBBillingTests(unittest.TestCase):
         self.assert_regular_ggb(service.get_user(user["id"]), 0)
 
         service.settle_image_quota(reservation, success=True, actual_count=1)
+        refreshed = service.get_user(user["id"])
+        self.assert_regular_ggb(refreshed, GGB_PER_IMAGE)
+        self.assertEqual(refreshed["active_image_requests"], 0)
+
+    def test_cancelled_logged_image_call_refunds_reserved_ggb_and_releases_concurrency(self) -> None:
+        service = self.load_service()
+        user = service.create_user(
+            email="cancelled-ggb@example.com",
+            password="UserPass123!",
+            image_quota=GGB_PER_IMAGE,
+            image_concurrency=1,
+        )
+        reservation = service.reserve_image_quota(user, 1, "/api/image/generations")
+        after_reserve = service.get_user(user["id"])
+        self.assert_regular_ggb(after_reserve, 0)
+        self.assertEqual(after_reserve["active_image_requests"], 1)
+
+        from services.log_service import LoggedCall
+
+        def cancelled_handler(_payload):
+            raise asyncio.CancelledError()
+
+        async def run_cancelled_call() -> None:
+            with self.assertRaises(asyncio.CancelledError):
+                await LoggedCall(user, "/api/image/generations", "gpt-image-2", "文生图").run(
+                    cancelled_handler,
+                    {},
+                    reservation,
+                )
+
+        asyncio.run(run_cancelled_call())
+
+        refreshed = service.get_user(user["id"])
+        self.assert_regular_ggb(refreshed, GGB_PER_IMAGE)
+        self.assertEqual(refreshed["active_image_requests"], 0)
+
+    def test_cancelled_stream_first_item_refunds_reserved_ggb_and_releases_concurrency(self) -> None:
+        service = self.load_service()
+        user = service.create_user(
+            email="cancelled-stream-ggb@example.com",
+            password="UserPass123!",
+            image_quota=GGB_PER_IMAGE,
+            image_concurrency=1,
+        )
+        reservation = service.reserve_image_quota(user, 1, "/api/image/generations")
+        after_reserve = service.get_user(user["id"])
+        self.assert_regular_ggb(after_reserve, 0)
+        self.assertEqual(after_reserve["active_image_requests"], 1)
+
+        from services.log_service import LoggedCall
+
+        class CancelledIterator:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise asyncio.CancelledError()
+
+        async def run_cancelled_stream() -> None:
+            with self.assertRaises(asyncio.CancelledError):
+                await LoggedCall(user, "/api/image/generations", "gpt-image-2", "文生图").run(
+                    lambda _payload: CancelledIterator(),
+                    {},
+                    reservation,
+                )
+
+        asyncio.run(run_cancelled_stream())
+
         refreshed = service.get_user(user["id"])
         self.assert_regular_ggb(refreshed, GGB_PER_IMAGE)
         self.assertEqual(refreshed["active_image_requests"], 0)

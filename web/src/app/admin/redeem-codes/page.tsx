@@ -278,7 +278,7 @@ export default function AdminRedeemCodesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="image_quota">GGB 兑换码</SelectItem>
+                <SelectItem value="image_quota">狗狗币兑换码</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
                 <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
@@ -520,7 +520,7 @@ function GenerateRedeemDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="image_quota">GGB 兑换码</SelectItem>
+                <SelectItem value="image_quota">狗狗币兑换码</SelectItem>
                 <SelectItem value="concurrency">图片并发</SelectItem>
                 <SelectItem value="membership">会员兑换</SelectItem>
                 <SelectItem value="invitation">邀请码</SelectItem>
@@ -537,7 +537,7 @@ function GenerateRedeemDialog({
                 <SelectContent>
                   {plans.filter((plan) => plan.enabled).map((plan) => (
                     <SelectItem key={plan.id} value={plan.id}>
-                      {plan.name} / {plan.period_image_quota} GGB 每 {plan.period_days} 天
+                      {plan.name} / {plan.period_image_quota} 狗狗币 / 每 {plan.period_days} 天
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -547,7 +547,7 @@ function GenerateRedeemDialog({
           ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>{form.type === "image_quota" ? "GGB 数值" : "数值"}</FieldLabel>
+              <FieldLabel>{form.type === "image_quota" ? "狗狗币数值" : "数值"}</FieldLabel>
               <Input
                 value={form.value}
                 type="number"

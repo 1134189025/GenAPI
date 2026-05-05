@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import itertools
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -156,6 +156,130 @@ def _next_item(items):
         return False, None
 
 
+def _close_iterator(items) -> None:
+    close = getattr(items, "close", None)
+    if callable(close):
+        close()
+
+
+def _prepend_item(first, items):
+    try:
+        yield first
+        yield from items
+    finally:
+        _close_iterator(items)
+
+
+_NO_PENDING_ITEM = object()
+
+
+def _is_sse_data_chunk(chunk: object) -> bool:
+    if isinstance(chunk, str):
+        return chunk.startswith("data:")
+    if isinstance(chunk, bytes | memoryview):
+        return bytes(chunk).startswith(b"data:")
+    return False
+
+
+class _QuotaTrackedStream:
+    def __init__(self, call: "LoggedCall", items, quota_reservation=None):
+        self.call = call
+        self.items = iter(items)
+        self.quota_reservation = quota_reservation
+        self.urls: list[str] = []
+        self.actual_count = 0
+        self.closed = False
+        self.pending_item: object = _NO_PENDING_ITEM
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.closed:
+            raise StopIteration
+        self.mark_pending_delivered()
+        try:
+            item = next(self.items)
+        except StopIteration:
+            self.close()
+            raise
+        except asyncio.CancelledError as exc:
+            self._fail(exc, safe_error="image request cancelled", suffix="流式调用取消", status="cancelled")
+            raise
+        except Exception as exc:
+            self._fail(exc)
+            raise
+        self.pending_item = item
+        return item
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            _close_iterator(self.items)
+        finally:
+            self._settle_success()
+
+    def mark_pending_delivered(self) -> None:
+        if self.pending_item is _NO_PENDING_ITEM:
+            return
+        item = self.pending_item
+        self.pending_item = _NO_PENDING_ITEM
+        self.urls.extend(_collect_urls(item))
+        self.actual_count += _count_delivered_images(item)
+
+    def _settle_success(self) -> None:
+        from services.quota_service import settle_image_quota
+
+        settle_image_quota(self.quota_reservation, success=True, actual_count=self.actual_count)
+        self.call.log("流式调用结束", urls=self.urls)
+
+    def _fail(
+        self,
+        exc: BaseException,
+        *,
+        safe_error: str | None = None,
+        suffix: str = "流式调用失败",
+        status: str = "failed",
+    ) -> None:
+        from services.quota_service import settle_image_quota
+
+        if self.closed:
+            return
+        self.closed = True
+        safe_message = safe_error or redact_sensitive_text(str(exc))
+        settle_image_quota(
+            self.quota_reservation,
+            success=self.actual_count > 0,
+            actual_count=self.actual_count,
+            error=safe_message,
+        )
+        self.call.log(suffix, status=status, error=safe_message, urls=self.urls)
+
+
+class _QuotaTrackedStreamingResponse(StreamingResponse):
+    def __init__(self, sender, tracked_items: _QuotaTrackedStream, *, media_type: str):
+        self._tracked_items = tracked_items
+        self._sse_items = sender(tracked_items)
+        super().__init__(self._sse_items, media_type=media_type)
+
+    async def stream_response(self, send) -> None:
+        await send({"type": "http.response.start", "status": self.status_code, "headers": self.raw_headers})
+        try:
+            async for chunk in self.body_iterator:
+                if not isinstance(chunk, bytes | memoryview):
+                    chunk = chunk.encode(self.charset)
+                await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                if _is_sse_data_chunk(chunk):
+                    self._tracked_items.mark_pending_delivered()
+
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        finally:
+            _close_iterator(self._sse_items)
+            _close_iterator(self._tracked_items)
+
+
 @dataclass
 class LoggedCall:
     identity: dict[str, object]
@@ -173,6 +297,11 @@ class LoggedCall:
             *args, quota_reservation = args
         try:
             result = await run_in_threadpool(handler, *args)
+        except asyncio.CancelledError:
+            safe_error = "image request cancelled"
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("调用取消", status="cancelled", error=safe_error)
+            raise
         except ImageGenerationError as exc:
             safe_error = redact_sensitive_text(str(exc))
             settle_image_quota(quota_reservation, success=False, error=safe_error)
@@ -197,6 +326,11 @@ class LoggedCall:
         sender = anthropic_sse_stream if sse == "anthropic" else sse_json_stream
         try:
             has_first, first = await run_in_threadpool(_next_item, result)
+        except asyncio.CancelledError:
+            safe_error = "image request cancelled"
+            settle_image_quota(quota_reservation, success=False, error=safe_error)
+            self.log("流式调用取消", status="cancelled", error=safe_error)
+            raise
         except ImageGenerationError as exc:
             safe_error = redact_sensitive_text(str(exc))
             settle_image_quota(quota_reservation, success=False, error=safe_error)
@@ -216,38 +350,20 @@ class LoggedCall:
             settle_image_quota(quota_reservation, success=True, actual_count=0)
             self.log("流式调用结束")
             return StreamingResponse(sender(()), media_type="text/event-stream")
-        return StreamingResponse(
-            sender(self.stream(itertools.chain([first], result), quota_reservation=quota_reservation)),
-            media_type="text/event-stream",
-        )
+        tracked_items = self.stream(_prepend_item(first, result), quota_reservation=quota_reservation)
+        return _QuotaTrackedStreamingResponse(sender, tracked_items, media_type="text/event-stream")
+
+    def sse_stream(self, sender, tracked_items):
+        sse_items = sender(tracked_items)
+        try:
+            for chunk in sse_items:
+                yield chunk
+        finally:
+            _close_iterator(sse_items)
+            _close_iterator(tracked_items)
 
     def stream(self, items, quota_reservation=None):
-        from services.quota_service import settle_image_quota
-
-        urls: list[str] = []
-        actual_count = 0
-        failed = False
-        try:
-            for item in items:
-                urls.extend(_collect_urls(item))
-                actual_count += _count_delivered_images(item)
-                yield item
-        except Exception as exc:
-            failed = True
-            safe_error = redact_sensitive_text(str(exc))
-            # Failed streams that already delivered images should charge those images and refund the rest.
-            settle_image_quota(
-                quota_reservation,
-                success=actual_count > 0,
-                actual_count=actual_count,
-                error=safe_error,
-            )
-            self.log("流式调用失败", status="failed", error=safe_error, urls=urls)
-            raise
-        finally:
-            if not failed:
-                settle_image_quota(quota_reservation, success=True, actual_count=actual_count)
-                self.log("流式调用结束", urls=urls)
+        return _QuotaTrackedStream(self, items, quota_reservation=quota_reservation)
 
     def log(self, suffix: str, result: object = None, status: str = "success", error: str = "",
             urls: list[str] | None = None) -> None:

@@ -32,7 +32,35 @@ class ImageResolutionTests(unittest.TestCase):
             image_size_metadata("16:9"),
             {"target_size": "16:9", "target_width": None, "target_height": None, "target_aspect_ratio": "16:9"},
         )
+        for size, width, height, ratio in (
+            ("1920x1080", 1920, 1080, "16:9"),
+            ("1080x1920", 1080, 1920, "9:16"),
+            ("2560x1440", 2560, 1440, "16:9"),
+            ("1440x2560", 1440, 2560, "9:16"),
+            ("3840x2160", 3840, 2160, "16:9"),
+            ("2160x3840", 2160, 3840, "9:16"),
+        ):
+            with self.subTest(size=size):
+                self.assertEqual(
+                    image_size_metadata(size),
+                    {
+                        "target_size": size,
+                        "target_width": width,
+                        "target_height": height,
+                        "target_aspect_ratio": ratio,
+                    },
+                )
         self.assertEqual(image_size_metadata(""), {})
+
+    def test_common_resolution_presets_are_target_size_hints(self) -> None:
+        from services.protocol.conversation import build_image_prompt, validate_image_size
+
+        self.assertEqual(validate_image_size("1920 × 1080"), "1920x1080")
+        prompt = build_image_prompt("draw a product hero", "3840x2160")
+
+        self.assertIn("目标输出分辨率为 3840x2160", prompt)
+        self.assertIn("4K UHD", prompt)
+        self.assertNotIn("保证输出", prompt)
 
     def test_validate_image_size_rejects_unsupported_values(self) -> None:
         from services.protocol.conversation import validate_image_size

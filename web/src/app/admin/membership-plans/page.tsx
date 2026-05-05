@@ -219,7 +219,7 @@ export default function AdminMembershipPlansPage() {
       <div className="grid gap-3 md:grid-cols-3">
         <StatCard label="套餐总数" value={summary.total} icon={<Crown className="size-5" />} tone="slate" />
         <StatCard label="已启用" value={summary.enabled} icon={<Crown className="size-5" />} tone="emerald" />
-        <StatCard label="周期 GGB 合计" value={`${summary.quota} GGB`} icon={<Plus className="size-5" />} tone="blue" />
+        <StatCard label="周期狗狗币合计" value={`${summary.quota} 狗狗币`} icon={<Plus className="size-5" />} tone="blue" />
       </div>
 
       <DataPanel title="会员套餐列表" description="排序值越小越靠前，用户会员中心和兑换码生成表单会按后端返回顺序展示。">
@@ -238,7 +238,7 @@ export default function AdminMembershipPlansPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>套餐</TableHead>
-                  <TableHead>周期 GGB</TableHead>
+                  <TableHead>周期狗狗币</TableHead>
                   <TableHead>有效天数</TableHead>
                   <TableHead>周期天数</TableHead>
                   <TableHead>排序</TableHead>
@@ -253,7 +253,7 @@ export default function AdminMembershipPlansPage() {
                       <div className="font-semibold text-slate-900">{item.name}</div>
                       <div className="mt-1 max-w-[360px] truncate text-xs text-slate-500">{item.description || "—"}</div>
                     </TableCell>
-                    <TableCell className="font-semibold text-slate-700">{item.period_image_quota} GGB</TableCell>
+                    <TableCell className="font-semibold text-slate-700">{item.period_image_quota} 狗狗币</TableCell>
                     <TableCell>{item.duration_days} 天</TableCell>
                     <TableCell>{item.period_days} 天</TableCell>
                     <TableCell>{item.sort_order}</TableCell>
@@ -352,7 +352,7 @@ function PlanDialog({
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>周期 GGB</FieldLabel>
+              <FieldLabel>周期狗狗币</FieldLabel>
               <Input value={form.period_image_quota} type="number" min={0} className="rounded-xl" onChange={(event) => onFormChange({ ...form, period_image_quota: event.target.value })} />
             </Field>
             <Field>

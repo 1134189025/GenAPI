@@ -42,7 +42,17 @@ const imageSizeOptions = [
   { value: "864x1536", label: "864x1536 竖版" },
   { value: "1280x960", label: "1280x960 横版" },
   { value: "960x1280", label: "960x1280 竖版" },
+  { value: "1920x1080", label: "1080P 横版" },
+  { value: "1080x1920", label: "1080P 竖版" },
+  { value: "2560x1440", label: "2K QHD 横版" },
+  { value: "1440x2560", label: "2K QHD 竖版" },
+  { value: "3840x2160", label: "4K UHD 横版" },
+  { value: "2160x3840", label: "4K UHD 竖版" },
 ];
+
+function isInteractiveComposerTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("button,input,textarea,select,a,[role='button']"));
+}
 
 export function ImageComposer({
   mode,
@@ -185,7 +195,10 @@ export function ImageComposer({
         <div className="glass-panel rounded-[2rem] sm:rounded-[2.5rem]">
           <div
             className="relative cursor-text"
-            onClick={() => {
+            onClick={(event) => {
+              if (isInteractiveComposerTarget(event.target)) {
+                return;
+              }
               textareaRef.current?.focus();
             }}
           >

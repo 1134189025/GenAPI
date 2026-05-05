@@ -37,7 +37,7 @@ const userNavigation: NavGroup[] = [
       {
         href: "/image",
         label: "生图仪表盘",
-        description: "创作、历史、GGB 余额和任务队列",
+        description: "创作、历史、狗狗币余额和任务队列",
         icon: "brush",
       },
       {
@@ -49,13 +49,13 @@ const userNavigation: NavGroup[] = [
       {
         href: "/membership",
         label: "会员中心",
-        description: "会员状态、套餐和周期 GGB",
+        description: "会员状态、套餐和周期狗狗币",
         icon: "crown",
       },
       {
         href: "/redeem",
         label: "兑换中心",
-        description: "兑换 GGB 余额、并发和会员码",
+        description: "兑换狗狗币余额、并发和会员码",
         icon: "gift",
       },
     ],
@@ -143,7 +143,7 @@ for (const group of adminNavigation) {
 Object.assign(pageMeta, {
   "/": { title: "进入系统", description: "检查登录状态并跳转" },
   "/login": { title: "登录", description: "使用邮箱和密码进入控制台" },
-  "/register": { title: "注册", description: "创建账号并领取 GGB" },
+  "/register": { title: "注册", description: "创建账号并领取狗狗币" },
   "/setup": { title: "初始化", description: "创建首个管理员账号" },
   "/accounts": pageMeta["/admin/accounts"],
   "/image-manager": pageMeta["/admin/images"],

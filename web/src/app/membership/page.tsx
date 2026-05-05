@@ -229,12 +229,12 @@ export default function MembershipPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="当前会员" value={isLoading ? "加载中..." : membershipStatus} icon={<Crown className="size-5" />} tone={activeMembership ? "amber" : "slate"} />
-        <StatCard label="会员 GGB" value={formatQuotaAsGgb(user?.member_image_quota ?? 0)} hint="当前周期剩余 GGB" icon={<Sparkles className="size-5" />} tone="teal" />
-        <StatCard label="总 GGB 余额" value={formatQuotaAsGgb(user?.total_image_quota ?? user?.image_quota ?? 0)} hint="普通 GGB + 会员 GGB" icon={<Sparkles className="size-5" />} tone="blue" />
+        <StatCard label="会员狗狗币" value={formatQuotaAsGgb(user?.member_image_quota ?? 0)} hint="当前周期剩余狗狗币" icon={<Sparkles className="size-5" />} tone="teal" />
+        <StatCard label="总狗狗币余额" value={formatQuotaAsGgb(user?.total_image_quota ?? user?.image_quota ?? 0)} hint="普通狗狗币 + 会员狗狗币" icon={<Sparkles className="size-5" />} tone="blue" />
         <StatCard label="周期结束" value={formatDate(user?.membership_period_ends_at)} icon={<CalendarClock className="size-5" />} tone="emerald" />
       </div>
 
-      <DataPanel title="每日签到" description="每日签到领取普通 GGB 余额，连续签到可获得额外奖励。">
+      <DataPanel title="每日签到" description="每日签到领取普通狗狗币余额，连续签到可获得额外奖励。">
         {isCheckinLoading ? (
           <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-slate-500">
             <LoaderCircle className="size-5 animate-spin" />
@@ -258,7 +258,7 @@ export default function MembershipPage() {
           <div className="p-5">
             <EmptyState
               title="签到奖励暂未开启"
-              description="管理员开启后，用户可在这里领取每日 GGB。"
+              description="管理员开启后，用户可在这里领取每日狗狗币。"
               icon={<Gift className="size-7" />}
             />
           </div>
@@ -280,7 +280,7 @@ export default function MembershipPage() {
                 )}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-600">
-                奖励会发放到普通 GGB 余额，可用于生成或编辑图片。
+                奖励会发放到普通狗狗币余额，可用于生成或编辑图片。
               </p>
             </div>
             <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-3 lg:grid-cols-1">
@@ -304,7 +304,7 @@ export default function MembershipPage() {
         )}
       </DataPanel>
 
-      <DataPanel title="当前会员" description="会员 GGB 按套餐周期刷新，不会结转到下一个周期。">
+      <DataPanel title="当前会员" description="会员狗狗币按套餐周期刷新，不会结转到下一个周期。">
         {isLoading ? (
           <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-slate-500">
             <LoaderCircle className="size-5 animate-spin" />
@@ -318,7 +318,7 @@ export default function MembershipPage() {
                 <span className="min-w-0 break-words text-sm font-bold text-slate-900">{activeMembership.plan_name}</span>
               </div>
               <div className="mt-4 text-sm leading-6 text-slate-600">
-                每 {activeMembership.period_days} 天刷新 {formatQuotaAsGgb(activeMembership.period_image_quota)} 会员 GGB，有效期 {activeMembership.duration_days} 天。
+                每 {activeMembership.period_days} 天刷新 {formatQuotaAsGgb(activeMembership.period_image_quota)} 会员狗狗币，有效期 {activeMembership.duration_days} 天。
               </div>
             </div>
             <div className="break-words rounded-3xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-600">
@@ -331,7 +331,7 @@ export default function MembershipPage() {
           <div className="p-5">
             <EmptyState
               title="暂无有效会员"
-              description="获取会员兑换码后，可在兑换中心激活套餐并领取周期会员 GGB。"
+              description="获取会员兑换码后，可在兑换中心激活套餐并领取周期会员狗狗币。"
               icon={<Crown className="size-7" />}
               action={
                 <Button asChild className="rounded-xl bg-slate-950 text-white hover:bg-slate-800">
@@ -365,7 +365,7 @@ export default function MembershipPage() {
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 sm:block sm:text-center">
                   <div className="break-words text-lg font-black text-slate-950">{formatQuotaAsGgb(plan.period_image_quota)}</div>
-                  周期 GGB
+                  周期狗狗币
                 </div>
               </div>
             </div>

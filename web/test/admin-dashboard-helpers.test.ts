@@ -95,11 +95,11 @@ describe("admin dashboard helpers", () => {
     expect(getRedeemCodeStatus({ enabled: true, used: false, expires_at: "2026-04-28T11:00:00.000Z" }, now).key).toBe(
       "expired",
     );
-    expect(getRedeemCodeTypeLabel("image_quota")).toBe("GGB");
+    expect(getRedeemCodeTypeLabel("image_quota")).toBe("狗狗币");
     expect(getRedeemCodeTypeLabel("membership")).toBe("会员兑换");
     expect(getRedeemValueLabel({ type: "invitation", value: 0 })).toBe("注册邀请");
     expect(getRedeemValueLabel({ type: "membership", value: 0, membership_plan_id: "plan-a" })).toBe("会员套餐");
-    expect(getRedeemValueLabel({ type: "image_quota", value: 12 })).toBe("+12 GGB");
+    expect(getRedeemValueLabel({ type: "image_quota", value: 12 })).toBe("+12 狗狗币");
     expect(getRedeemValueLabel({ type: "concurrency", value: 3 })).toBe("+3");
   });
 

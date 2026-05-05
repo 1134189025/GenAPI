@@ -24,8 +24,10 @@ describe("mobile image page contracts", () => {
     const composer = source("src/app/image/components/image-composer.tsx");
 
     expect(page).not.toContain('className="relative mx-auto flex h-[calc(100vh-5rem)]');
-    expect(page).toContain("h-[calc(100dvh-4.25rem)]");
-    expect(page).toContain("sm:h-[calc(100vh-5rem)]");
+    expect(page).toContain("h-[calc(100dvh-6.75rem)]");
+    expect(page).toContain("sm:h-[calc(100vh-6.75rem)]");
+    expect(page).toContain("lg:h-[calc(100vh-8.5rem)]");
+    expect(page).not.toContain("h-[calc(100dvh-4.25rem)]");
     expect(page).toContain("overflow-hidden");
     expect(page).toContain('isAdmin={session.role === "admin"}');
     expect(page).toContain("reserveMobileBottomNav={!isAdmin}");
@@ -84,6 +86,25 @@ describe("mobile image page contracts", () => {
     expect(composer).toContain("w-[min(18rem,calc(100vw-2rem))]");
     expect(composer).toContain("max-h-[min(16rem,calc(100dvh-12rem))]");
     expect(composer).toContain("overflow-y-auto");
+  });
+
+  test("keeps image count input from refocusing the prompt textarea", () => {
+    const composer = source("src/app/image/components/image-composer.tsx");
+
+    expect(composer).toContain("isInteractiveComposerTarget");
+    expect(composer).toContain("target.closest");
+    expect(composer).toContain("button,input,textarea,select,a");
+    expect(composer).not.toContain("onClick={() => {\n              textareaRef.current?.focus();\n            }}");
+  });
+
+  test("renders multi-image results as a stable responsive grid", () => {
+    const results = source("src/app/image/components/image-results.tsx");
+
+    expect(results).toContain("grid grid-cols-1 gap-3 sm:grid-cols-2");
+    expect(results).toContain("lg:grid-cols-3");
+    expect(results).toContain("object-contain");
+    expect(results).not.toContain("columns-");
+    expect(results).not.toContain("break-inside-avoid");
   });
 
   test("shows history delete controls on touch devices without hover", () => {

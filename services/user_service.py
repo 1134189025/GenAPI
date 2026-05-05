@@ -726,9 +726,9 @@ class UserService:
                 changed = True
             if session.query(MembershipPlanModel).count() == 0:
                 defaults = [
-                    ("日卡", "激活后 1 天内可用，每周期 1 天刷新 GGB。", 1, 1, 50, 10),
-                    ("周卡", "激活后 7 天内可用，每周期 7 天刷新 GGB。", 7, 7, 400, 20),
-                    ("月卡", "激活后 30 天内可用，每周期 30 天刷新 GGB。", 30, 30, 1800, 30),
+                    ("日卡", "激活后 1 天内可用，每周期 1 天刷新狗狗币。", 1, 1, 50, 10),
+                    ("周卡", "激活后 7 天内可用，每周期 7 天刷新狗狗币。", 7, 7, 400, 20),
+                    ("月卡", "激活后 30 天内可用，每周期 30 天刷新狗狗币。", 30, 30, 1800, 30),
                 ]
                 for name, description, duration_days, period_days, period_quota, sort_order in defaults:
                     session.add(
@@ -2342,7 +2342,7 @@ class UserService:
             )
             regular_available = int(user.image_quota or 0)
             if member_available + regular_available < amount:
-                raise UserServiceError("insufficient GGB balance", status_code=429, code="insufficient_quota")
+                raise UserServiceError("insufficient dog coin balance", status_code=429, code="insufficient_quota")
             member_to_use = min(member_available, amount)
             regular_to_use = amount - member_to_use
             membership_source_redeem_code_id = (
@@ -2551,7 +2551,7 @@ class UserService:
                         member_refunded_ggb=member_reserved_ggb,
                         regular_refunded_ggb=regular_reserved_ggb,
                         status="recovered",
-                        error="recovered stale reserved GGB",
+                        error="recovered stale reserved dog coin",
                         settled_at=now,
                     )
                 )

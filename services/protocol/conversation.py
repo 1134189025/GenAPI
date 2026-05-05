@@ -155,6 +155,42 @@ IMAGE_RESOLUTION_PRESETS: dict[str, dict[str, Any]] = {
         "target_aspect_ratio": "3:4",
         "prompt_hint": "目标输出分辨率为 960x1280，3:4 竖版构图，适合人物肖像或竖向场景。",
     },
+    "1920x1080": {
+        "target_width": 1920,
+        "target_height": 1080,
+        "target_aspect_ratio": "16:9",
+        "prompt_hint": "目标输出分辨率为 1920x1080，1080P 16:9 横版构图，适合高清横幅展示。",
+    },
+    "1080x1920": {
+        "target_width": 1080,
+        "target_height": 1920,
+        "target_aspect_ratio": "9:16",
+        "prompt_hint": "目标输出分辨率为 1080x1920，1080P 9:16 竖版构图，适合手机竖屏展示。",
+    },
+    "2560x1440": {
+        "target_width": 2560,
+        "target_height": 1440,
+        "target_aspect_ratio": "16:9",
+        "prompt_hint": "目标输出分辨率为 2560x1440，2K QHD 16:9 横版构图，适合高细节横屏展示。",
+    },
+    "1440x2560": {
+        "target_width": 1440,
+        "target_height": 2560,
+        "target_aspect_ratio": "9:16",
+        "prompt_hint": "目标输出分辨率为 1440x2560，2K QHD 9:16 竖版构图，适合高细节手机竖屏展示。",
+    },
+    "3840x2160": {
+        "target_width": 3840,
+        "target_height": 2160,
+        "target_aspect_ratio": "16:9",
+        "prompt_hint": "目标输出分辨率为 3840x2160，4K UHD 16:9 横版构图，适合超高清横屏展示。",
+    },
+    "2160x3840": {
+        "target_width": 2160,
+        "target_height": 3840,
+        "target_aspect_ratio": "9:16",
+        "prompt_hint": "目标输出分辨率为 2160x3840，4K UHD 9:16 竖版构图，适合超高清手机竖屏展示。",
+    },
 }
 
 LEGACY_IMAGE_ASPECT_RATIOS: dict[str, str] = {

@@ -262,8 +262,8 @@ export default function AdminUsersPage() {
         <StatCard label="用户总数" value={summary.total} icon={<Users className="size-5" />} tone="slate" />
         <StatCard label="已启用" value={summary.enabled} icon={<UserCheck className="size-5" />} tone="emerald" />
         <StatCard label="管理员" value={summary.admins} icon={<ShieldCheck className="size-5" />} tone="teal" />
-        <StatCard label="GGB 余额" value={`${summary.quota} GGB`} icon={<Plus className="size-5" />} tone="blue" />
-        <StatCard label="会员 GGB" value={`${summary.memberQuota} GGB`} icon={<Plus className="size-5" />} tone="amber" />
+        <StatCard label="狗狗币余额" value={`${summary.quota} 狗狗币`} icon={<Plus className="size-5" />} tone="blue" />
+        <StatCard label="会员狗狗币" value={`${summary.memberQuota} 狗狗币`} icon={<Plus className="size-5" />} tone="amber" />
       </div>
 
       <DataPanel
@@ -342,8 +342,8 @@ export default function AdminUsersPage() {
                   <TableHead>用户</TableHead>
                   <TableHead>角色</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>GGB 余额</TableHead>
-                  <TableHead>会员 GGB</TableHead>
+                  <TableHead>狗狗币余额</TableHead>
+                  <TableHead>会员狗狗币</TableHead>
                   <TableHead>会员状态</TableHead>
                   <TableHead>图片并发</TableHead>
                   <TableHead>活动请求</TableHead>
@@ -388,8 +388,8 @@ export default function AdminUsersPage() {
                           {status.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-slate-700">{item.total_image_quota ?? item.image_quota} GGB</TableCell>
-                      <TableCell className="font-medium text-slate-700">{item.member_image_quota ?? 0} GGB</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.total_image_quota ?? item.image_quota} 狗狗币</TableCell>
+                      <TableCell className="font-medium text-slate-700">{item.member_image_quota ?? 0} 狗狗币</TableCell>
                       <TableCell>
                         <Badge variant={item.membership_status === "active" ? "warning" : "secondary"} className="rounded-md">
                           {item.membership_status === "active" ? item.membership_plan_name || "会员" : item.membership_status === "expired" ? "已过期" : "未开通"}
@@ -565,7 +565,7 @@ function UserFormDialog({
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel>GGB 余额</FieldLabel>
+              <FieldLabel>狗狗币余额</FieldLabel>
               <Input
                 value={form.image_quota}
                 type="number"

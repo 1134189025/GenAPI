@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 from collections.abc import Iterable
 from io import BytesIO
 
@@ -240,6 +241,9 @@ def create_router() -> APIRouter:
             return quota_reservation
         try:
             images = await _read_limited_uploads(uploads)
+        except asyncio.CancelledError:
+            settle_image_quota(quota_reservation, success=False, error="image edit upload cancelled")
+            raise
         except HTTPException as exc:
             settle_image_quota(quota_reservation, success=False, error=str(exc.detail))
             raise

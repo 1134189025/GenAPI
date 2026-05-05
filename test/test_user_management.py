@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib
 import os
@@ -707,6 +708,41 @@ class UserManagementAPITests(unittest.TestCase):
 
         with patch("api.ai._read_limited_uploads", side_effect=RuntimeError("upload read failed")):
             with self.assertRaisesRegex(RuntimeError, "upload read failed"):
+                self.client.post(
+                    "/api/image/edits",
+                    headers=headers,
+                    data={"prompt": "edit", "model": "gpt-image-2", "n": "1"},
+                    files={"image": ("reference.png", b"fake-image", "image/png")},
+                )
+
+        user = self.client.get("/api/auth/me", headers=headers).json()["user"]
+        self.assertEqual(user["image_quota"], GGB_PER_IMAGE)
+        self.assertEqual(user["active_image_requests"], 0)
+
+    def test_image_edit_read_cancelled_refunds_quota_and_releases_concurrency(self) -> None:
+        admin_token = self.create_admin()
+        created = self.client.post(
+            "/api/admin/users",
+            headers=self.auth_headers(admin_token),
+            json={
+                "email": "edit-read-cancelled@example.com",
+                "password": "UserPass123!",
+                "role": "user",
+                "enabled": True,
+                "image_quota": GGB_PER_IMAGE,
+                "image_concurrency": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "edit-read-cancelled@example.com", "password": "UserPass123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        headers = self.auth_headers(login.json()["token"])
+
+        with patch("api.ai._read_limited_uploads", side_effect=asyncio.CancelledError()):
+            with self.assertRaisesRegex(RuntimeError, "No response returned"):
                 self.client.post(
                     "/api/image/edits",
                     headers=headers,
